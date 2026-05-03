@@ -1,9 +1,12 @@
 import {
+  File as FileIcon,
   AlertCircle,
   FileText,
   Image as ImageIcon,
   Loader2,
+  Music2,
   Upload,
+  Video,
   X
 } from "lucide-react";
 import { formatNumber } from "../lib/formatters";
@@ -21,10 +24,12 @@ function formatBytes(value) {
 }
 
 function getAttachmentDetail(attachment) {
+  const mimeLabel = attachment.mime_type ? `, ${attachment.mime_type}` : "";
+
   if (attachment.type === "document") {
     return `${formatBytes(attachment.size_bytes)}${
       Number.isFinite(attachment.pages) ? `, ${attachment.pages} pages` : ""
-    }`;
+    }${mimeLabel}`;
   }
 
   if (attachment.type === "image") {
@@ -32,10 +37,30 @@ function getAttachmentDetail(attachment) {
       attachment.width && attachment.height
         ? `, ${attachment.width}x${attachment.height}px`
         : ""
-    }`;
+    }${mimeLabel}`;
   }
 
-  return formatBytes(attachment.size_bytes);
+  return `${formatBytes(attachment.size_bytes)}${mimeLabel}`;
+}
+
+function getAttachmentIcon(type) {
+  if (type === "image") {
+    return ImageIcon;
+  }
+
+  if (type === "audio") {
+    return Music2;
+  }
+
+  if (type === "video") {
+    return Video;
+  }
+
+  if (type === "text" || type === "document") {
+    return FileText;
+  }
+
+  return FileIcon;
 }
 
 export default function InputAttachments({
@@ -60,7 +85,7 @@ export default function InputAttachments({
         <div>
           <p className="text-sm font-semibold text-ink">Input attachments</p>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            PDFs and images stay local; only token metadata is analyzed.
+            Any file stays local; only token metadata is analyzed.
           </p>
         </div>
 
@@ -68,7 +93,6 @@ export default function InputAttachments({
         <input
           type="file"
           multiple
-          accept="application/pdf,image/*"
           onChange={handleFileChange}
           className="sr-only"
         />
@@ -77,7 +101,7 @@ export default function InputAttachments({
         ) : (
           <Upload className="h-4 w-4 text-primary" />
         )}
-          {isEstimating ? "Estimating..." : "Attach PDF/Image"}
+          {isEstimating ? "Estimating..." : "Attach files"}
         </label>
       </div>
 
@@ -91,7 +115,7 @@ export default function InputAttachments({
       {attachments.length > 0 ? (
         <div className="space-y-2">
           {attachments.map((attachment) => {
-            const Icon = attachment.type === "image" ? ImageIcon : FileText;
+            const Icon = getAttachmentIcon(attachment.type);
 
             return (
               <div

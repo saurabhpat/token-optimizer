@@ -1,13 +1,14 @@
-const MEDIA_OUTPUT_TYPES = new Set(["Image", "Video", "Audiobook"]);
-const TEXT_OUTPUT_TYPES = new Set([
-  "Text",
-  "Chat",
-  "Agent",
-  "App",
-  "Website",
-  "MCP",
-  "Report/Document"
-]);
+const OUTPUT_TYPES = new Set(["Text", "File", "Image", "Audio", "Video"]);
+const OUTPUT_TYPE_ALIASES = {
+  Chat: "Text",
+  Agent: "Text",
+  App: "Text",
+  Website: "Text",
+  MCP: "Text",
+  "Report/Document": "File",
+  Audiobook: "Audio"
+};
+const NON_TEXT_OUTPUT_TYPES = new Set(["File", "Image", "Audio", "Video"]);
 const FREE_MODEL_PATTERN = /(^|[:/\s-])free($|[:/\s-])/i;
 const STRONG_GENERAL_MODEL_PATTERN =
   /gpt-4|gpt-5|claude|gemini|mistral|qwen|deepseek|llama|hermes/i;
@@ -50,6 +51,20 @@ function normalizeCandidateModel(model) {
   };
 }
 
+function normalizeOutputType(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (OUTPUT_TYPES.has(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return OUTPUT_TYPE_ALIASES[trimmedValue] ?? "";
+}
+
 function analyzePrompt(prompt, outputType) {
   const text = prompt.toLowerCase();
   const words = prompt.trim().split(/\s+/).filter(Boolean);
@@ -88,19 +103,7 @@ function analyzePrompt(prompt, outputType) {
 }
 
 function getSelectedOutputType(payload) {
-  if (
-    typeof payload?.output_type === "string" &&
-    (TEXT_OUTPUT_TYPES.has(payload.output_type) ||
-      MEDIA_OUTPUT_TYPES.has(payload.output_type))
-  ) {
-    return payload.output_type;
-  }
-
-  if (MEDIA_OUTPUT_TYPES.has(payload?.intent)) {
-    return payload.intent;
-  }
-
-  return "Chat";
+  return normalizeOutputType(payload?.output_type) || normalizeOutputType(payload?.intent) || "Text";
 }
 
 function supportsOutputType(model, outputType) {
@@ -114,14 +117,18 @@ function supportsOutputType(model, outputType) {
     return model.output_modalities.includes("video");
   }
 
-  if (outputType === "Audiobook") {
+  if (outputType === "Audio") {
     return (
       model.output_modalities.includes("audio") ||
       model.output_modalities.includes("speech")
     );
   }
 
-  if (/\b(lyria|music|audio|image|video|tts|speech|ocr)\b/.test(idAndName)) {
+  if (outputType === "File") {
+    return model.output_modalities.includes("file");
+  }
+
+  if (/\b(lyria|music|audio|image|video|file|tts|speech|ocr)\b/.test(idAndName)) {
     return false;
   }
 
@@ -129,7 +136,8 @@ function supportsOutputType(model, outputType) {
     model.output_modalities.includes("text") &&
     !model.output_modalities.includes("audio") &&
     !model.output_modalities.includes("image") &&
-    !model.output_modalities.includes("video")
+    !model.output_modalities.includes("video") &&
+    !model.output_modalities.includes("file")
   );
 }
 
@@ -146,24 +154,6 @@ function estimateModelCost(model, payload, result, inputTokensOverride) {
   return Number(textCost.toFixed(6));
 }
 
-function inferRecommendedIntent(prompt, currentIntent) {
-  const text = prompt.toLowerCase();
-
-  if (/\b(app|frontend|backend|component|api|database|dashboard)\b/.test(text)) {
-    return "App";
-  }
-
-  if (/\b(agent|workflow|tool use|autonomous)\b/.test(text)) {
-    return "Agent";
-  }
-
-  if (/\b(website|landing page|homepage|seo|hero section)\b/.test(text)) {
-    return "Website";
-  }
-
-  return currentIntent;
-}
-
 function getModeLabel(outputType, intent) {
   if (outputType === "Image") {
     return "Image generation";
@@ -173,16 +163,12 @@ function getModeLabel(outputType, intent) {
     return "Video generation";
   }
 
-  if (outputType === "Audiobook") {
+  if (outputType === "Audio") {
     return "Audio generation";
   }
 
-  if (outputType === "Report/Document") {
-    return "Document drafting";
-  }
-
-  if (intent === "Agent" || intent === "App" || intent === "Website" || intent === "MCP") {
-    return "Structured text and code planning";
+  if (outputType === "File") {
+    return "File generation";
   }
 
   return "Text generation";
@@ -245,7 +231,7 @@ function scoreModelConfidence(model, outputType, promptProfile) {
     score -= 0.06;
   }
 
-  if (MEDIA_OUTPUT_TYPES.has(outputType) && supportsOutputType(model, outputType)) {
+  if (NON_TEXT_OUTPUT_TYPES.has(outputType) && supportsOutputType(model, outputType)) {
     score += 0.06;
   }
 
@@ -282,17 +268,17 @@ function getPromptChange(prompt, outputType) {
     ].join(" ");
   }
 
-  if (outputType === "Audiobook") {
+  if (outputType === "Audio") {
     return [
       "Specify narrator tone, pacing, pronunciation constraints, and output length separately.",
       "Remove visual-only details unless they affect narration."
     ].join(" ");
   }
 
-  if (outputType === "Report/Document") {
+  if (outputType === "File") {
     return [
-      "State the target length, section outline, audience, and citation/detail expectations up front.",
-      "Move supporting context into a short source summary and ask for headings, tables, and assumptions only where needed."
+      "State the file type, target length, section outline, audience, and citation/detail expectations up front.",
+      "Move supporting context into a short source summary and ask for export-ready structure only where needed."
     ].join(" ");
   }
 
@@ -471,10 +457,10 @@ function buildTextPrompt(prompt, intent, outputType, modelProfile, promptProfile
     context ? `Context: ${context}` : "",
     requirements ? `Required content: ${requirements}` : "",
     constraints ? `Constraints: ${constraints}` : "",
-    outputType === "Report/Document"
-      ? "Document plan: include title, executive summary, structured sections, key assumptions, and concise next steps."
+    outputType === "File"
+      ? "File plan: include file type, title, structured sections, key assumptions, and concise next steps."
       : "",
-    modelProfile.isCoder || intent === "Agent" || intent === "App" || intent === "Website" || intent === "MCP"
+    modelProfile.isCoder
       ? "Execution: provide the smallest complete solution first, then include validation checks and edge cases."
       : "",
     modelProfile.isLight || modelProfile.isFree
@@ -497,7 +483,7 @@ function buildOptimizedPrompt(prompt, intent, outputType, model, promptProfile) 
     return buildVideoPrompt(prompt, modelProfile);
   }
 
-  if (outputType === "Audiobook") {
+  if (outputType === "Audio") {
     return buildAudioPrompt(prompt, modelProfile);
   }
 
@@ -519,17 +505,17 @@ function getPromptStrategy(model, intent, outputType, promptProfile) {
       : "Short scene plan with one clear action per beat";
   }
 
-  if (outputType === "Audiobook") {
+  if (outputType === "Audio") {
     return modelProfile.isPremium
       ? "Narration prompt with pacing, tone, and pronunciation control"
       : "Concise narration prompt with simple pacing constraints";
   }
 
-  if (outputType === "Report/Document") {
-    return "Document prompt with target length, section outline, and source/context boundaries";
+  if (outputType === "File") {
+    return "File prompt with target format, section outline, and source/context boundaries";
   }
 
-  if (modelProfile.isCoder || intent === "App" || intent === "Website") {
+  if (modelProfile.isCoder) {
     return "Implementation prompt with requirements, constraints, and acceptance checks";
   }
 
@@ -553,10 +539,10 @@ function getChangesMade(model, intent, outputType, promptProfile) {
     changes.push("Replaced generic quality language with image-model controls and concrete visual cues.");
   } else if (outputType === "Video") {
     changes.push("Reframed the request as scene beats with camera and transition guidance.");
-  } else if (outputType === "Audiobook") {
+  } else if (outputType === "Audio") {
     changes.push("Separated narration tone, pacing, and pronunciation constraints.");
-  } else if (outputType === "Report/Document") {
-    changes.push("Added document structure, target length, audience, and source-boundary guidance.");
+  } else if (outputType === "File") {
+    changes.push("Added file structure, target format, audience, and source-boundary guidance.");
   } else {
     changes.push("Separated objective, context, constraints, and output format.");
   }
@@ -590,7 +576,7 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
     ? candidateModels.map(normalizeCandidateModel).filter(Boolean)
     : [];
   const selectedOutputType = getSelectedOutputType(payload);
-  const recommendedIntent = inferRecommendedIntent(payload.prompt, payload.intent);
+  const recommendedIntent = selectedOutputType;
   const promptProfile = analyzePrompt(payload.prompt, selectedOutputType);
   const mode = getModeLabel(selectedOutputType, recommendedIntent);
 
@@ -609,15 +595,14 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
   const requiredContext =
     originalInputTokens + toFiniteNumber(result.predicted_output) + 512;
 
-  const compatibleCandidates = normalizedCandidates
+  const recommendationCandidates = normalizedCandidates
     .filter((model) => model.id !== selectedModelId)
-    .filter((model) => supportsOutputType(model, selectedOutputType))
     .filter(
       (model) =>
         model.context_length === null || model.context_length >= requiredContext
     );
 
-  if (compatibleCandidates.length === 0) {
+  if (recommendationCandidates.length === 0) {
     return {
       ...result,
       output_type: selectedOutputType,
@@ -627,7 +612,7 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
     };
   }
 
-  const recommendations = compatibleCandidates
+  const recommendations = recommendationCandidates
     .map((model) => {
       const estimatedCost = estimateModelCost(model, payload, result);
       const savings = Number((selectedCost - estimatedCost).toFixed(6));

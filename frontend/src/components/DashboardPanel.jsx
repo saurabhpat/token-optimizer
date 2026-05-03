@@ -172,22 +172,14 @@ function EstimateTab({ result, selectedModel, inputBreakdown, selectedOutputType
 
 function RecommendationsTab({
   recommendations,
-  selectedOutputType,
   selectedRecommendationId,
   onSelectRecommendation,
   onOpenPrompt
 }) {
   if (recommendations.length === 0) {
-    const modalityMessage =
-      selectedOutputType === "Image" ||
-      selectedOutputType === "Video" ||
-      selectedOutputType === "Audiobook"
-        ? `No compatible ${selectedOutputType.toLowerCase()} models found in the loaded OpenRouter catalog.`
-        : "No model recommendations were returned for this estimate.";
-
     return (
       <div className="rounded-lg border border-dashed border-border bg-white p-6 text-sm text-slate-500">
-        {modalityMessage}
+        No model recommendations were returned for this estimate.
       </div>
     );
   }
@@ -422,7 +414,6 @@ function SuccessState({
       {activeTab === "Recommendations" ? (
         <RecommendationsTab
           recommendations={recommendations}
-          selectedOutputType={selectedOutputType}
           selectedRecommendationId={selectedRecommendation?.model_id}
           onSelectRecommendation={setSelectedRecommendationId}
           onOpenPrompt={() => setActiveTab("Prompt")}

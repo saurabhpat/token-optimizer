@@ -7,7 +7,7 @@ import ModelSelector from "./components/ModelSelector";
 import OutputGoalSelector from "./components/OutputGoalSelector";
 import PromptInput from "./components/PromptInput";
 import TopNav from "./components/TopNav";
-import { OUTPUT_GOAL_OPTIONS } from "./constants/outputGoals";
+import { OUTPUT_GOAL_OPTIONS, normalizeOutputGoal } from "./constants/outputGoals";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { analyzePrompt, fetchModels } from "./lib/api";
 import { estimateAttachment } from "./lib/attachmentEstimator";
@@ -46,6 +46,31 @@ export default function App() {
   const hasImageAttachment = attachments.some(
     (attachment) => attachment.type === "image"
   );
+
+  function modelSupportsOutputGoal(model, outputGoal) {
+    const outputModalities = model?.output_modalities ?? [];
+
+    if (outputGoal === "Image") {
+      return outputModalities.includes("image");
+    }
+
+    if (outputGoal === "Video") {
+      return outputModalities.includes("video");
+    }
+
+    if (outputGoal === "Audio") {
+      return (
+        outputModalities.includes("audio") ||
+        outputModalities.includes("speech")
+      );
+    }
+
+    if (outputGoal === "File") {
+      return outputModalities.includes("file");
+    }
+
+    return outputModalities.includes("text");
+  }
 
   useEffect(() => {
     function handleHashChange() {
@@ -163,27 +188,6 @@ export default function App() {
     }
   }, [prompt]);
 
-  function modelSupportsOutputType(model, outputType) {
-    const outputModalities = model?.output_modalities ?? [];
-
-    if (outputType === "Image") {
-      return outputModalities.includes("image");
-    }
-
-    if (outputType === "Video") {
-      return outputModalities.includes("video");
-    }
-
-    if (outputType === "Audiobook") {
-      return (
-        outputModalities.includes("audio") ||
-        outputModalities.includes("speech")
-      );
-    }
-
-    return outputModalities.includes("text");
-  }
-
   function modelSupportsInputAttachments(model) {
     if (!hasImageAttachment) {
       return true;
@@ -197,12 +201,12 @@ export default function App() {
       return "";
     }
 
-    if (!modelSupportsOutputType(selectedModel, selectedOutputGoal)) {
-      return `Selected model does not advertise ${selectedOutputGoal.toLowerCase()} output support.`;
+    if (!modelSupportsOutputGoal(selectedModel, selectedOutputGoal)) {
+      return `Catalog note: this model does not advertise ${selectedOutputGoal.toLowerCase()} output in the loaded metadata. You can still estimate it if OpenRouter supports this route.`;
     }
 
     if (!modelSupportsInputAttachments(selectedModel)) {
-      return "Selected model does not advertise image input support.";
+      return "Catalog note: this model does not advertise image input in the loaded metadata.";
     }
 
     return "";
@@ -265,6 +269,7 @@ export default function App() {
         type: attachment.type,
         name: attachment.name,
         size_bytes: attachment.size_bytes,
+        mime_type: attachment.mime_type,
         pages: attachment.pages,
         width: attachment.width,
         height: attachment.height,
@@ -330,14 +335,14 @@ export default function App() {
 
     if (
       typeof recommendation?.output_type === "string" &&
-      OUTPUT_GOAL_OPTIONS.includes(recommendation.output_type)
+      OUTPUT_GOAL_OPTIONS.includes(normalizeOutputGoal(recommendation.output_type))
     ) {
-      setSelectedOutputGoal(recommendation.output_type);
+      setSelectedOutputGoal(normalizeOutputGoal(recommendation.output_type));
     } else if (
       typeof recommendation?.intent === "string" &&
-      OUTPUT_GOAL_OPTIONS.includes(recommendation.intent)
+      OUTPUT_GOAL_OPTIONS.includes(normalizeOutputGoal(recommendation.intent))
     ) {
-      setSelectedOutputGoal(recommendation.intent);
+      setSelectedOutputGoal(normalizeOutputGoal(recommendation.intent));
     }
 
     startTransition(() => {
@@ -352,7 +357,6 @@ export default function App() {
   const isActionDisabled =
     !prompt.trim() ||
     !selectedModel ||
-    Boolean(modelCompatibilityWarning) ||
     isBusy ||
     isEstimatingAttachments ||
     modelsState !== "success";
@@ -400,6 +404,13 @@ export default function App() {
                 />
 
                 <div className="grid gap-4 2xl:grid-cols-2">
+                  <div className="space-y-4">
+                    <OutputGoalSelector
+                      selectedGoal={selectedOutputGoal}
+                      onSelectGoal={handleSelectOutputGoal}
+                    />
+                  </div>
+
                   <ModelSelector
                     modelOptions={modelOptions}
                     selectedModelId={selectedModelId}
@@ -409,23 +420,16 @@ export default function App() {
                     errorMessage={modelsError}
                     warningMessage={modelCompatibilityWarning}
                   />
+                </div>
 
-                  <div className="space-y-4">
-                    <OutputGoalSelector
-                      selectedGoal={selectedOutputGoal}
-                      onSelectGoal={handleSelectOutputGoal}
-                    />
-
-                    <div className="space-y-3">
-                      <AnalyzeButton
-                        disabled={isActionDisabled}
-                        isLoading={analysisState === "loading"}
-                        onClick={handleAnalyze}
-                        label="Estimate cost"
-                        loadingLabel="Estimating..."
-                      />
-                    </div>
-                  </div>
+                <div className="space-y-3">
+                  <AnalyzeButton
+                    disabled={isActionDisabled}
+                    isLoading={analysisState === "loading"}
+                    onClick={handleAnalyze}
+                    label="Estimate cost"
+                    loadingLabel="Estimating..."
+                  />
                 </div>
               </div>
             </section>

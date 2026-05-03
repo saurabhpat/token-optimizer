@@ -37,8 +37,13 @@ export default function ModelSelector({
   useEffect(() => {
     if (selectedModel) {
       setQuery(selectedModel.name);
+      return;
     }
-  }, [selectedModel]);
+
+    if (!selectedModelId) {
+      setQuery("");
+    }
+  }, [selectedModel, selectedModelId]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -130,7 +135,11 @@ export default function ModelSelector({
               onKeyDown={handleKeyDown}
               disabled={isLoading || modelOptions.length === 0}
               placeholder={
-                isLoading ? "Loading OpenRouter models..." : "Search model name"
+                isLoading
+                  ? "Loading OpenRouter models..."
+                  : modelOptions.length === 0
+                    ? "No models available"
+                    : "Search model name"
               }
               role="combobox"
               aria-expanded={showResults}
@@ -202,7 +211,9 @@ export default function ModelSelector({
           <p className="text-sm font-medium text-rose-600">{errorMessage}</p>
         ) : null}
         {!errorMessage && warningMessage ? (
-          <p className="text-sm font-medium text-amber-700">{warningMessage}</p>
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium leading-5 text-amber-800">
+            {warningMessage}
+          </p>
         ) : null}
 
         <div className="flex flex-wrap gap-2 text-xs">

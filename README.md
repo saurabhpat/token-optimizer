@@ -2,13 +2,13 @@
 
 TokenOptimizer is a full-stack web application for estimating LLM usage cost before running a prompt. It helps builders compare model economics, understand prompt and attachment token impact, and get cheaper model/prompt recommendations before sending work to an LLM.
 
-The app is built as a monorepo with a React frontend, an Express backend, and an importable n8n workflow. The frontend counts prompt, PDF, and image input tokens locally. The backend proxies analysis requests to n8n and fetches the public OpenRouter model catalog, keeping private webhook URLs and API credentials out of the browser bundle.
+The app is built as a monorepo with a React frontend, an Express backend, and an importable n8n workflow. The frontend counts prompt and attachment input tokens locally. The backend proxies analysis requests to n8n and fetches the public OpenRouter model catalog, keeping private webhook URLs and API credentials out of the browser bundle.
 
 Use TokenOptimizer when you want to:
 
 - Check expected LLM cost before running a prompt-heavy task
-- Compare model pricing across text, document, image, video, and audiobook output goals
-- Estimate local PDF/image attachment token impact without uploading file contents
+- Compare model pricing across Text, File, Image, Audio, and Video output modalities
+- Estimate local attachment token impact without uploading file contents
 - Generate model-specific prompt optimization guidance
 - Keep vendor keys and webhook URLs in server-side configuration
 
@@ -17,11 +17,11 @@ Use TokenOptimizer when you want to:
 - Live prompt token counting with `tiktoken`
 - Searchable OpenRouter model catalog
 - Input and output price display per 1K tokens
-- Unified output goal selection for Chat, Agent, App, Website, MCP, Report/Document, Image, Video, and Audiobook estimates
-- Local PDF and image attachment estimation without sending file bytes to the backend
+- Modality-first output goal selection for Text, File, Image, Audio, and Video estimates
+- Local attachment estimation for text files, PDFs, images, media, and generic files without sending file bytes to the backend
 - Backend proxy to an n8n webhook for low-cost estimates
 - Cost estimate dashboard with loading, success, empty, and error states
-- Top 5 cost-optimized model recommendations filtered by selected output modality
+- Top 5 cost-optimized model recommendations
 - Per-model optimized prompt output with token and cost deltas
 - Copy optimized prompt and use recommended model plus prompt from the UI
 
@@ -259,8 +259,8 @@ Request:
 {
   "prompt": "Build a dashboard for tracking SaaS costs.",
   "model": "google/gemini-2.5-flash",
-  "intent": "Report/Document",
-  "output_type": "Report/Document",
+  "intent": "Text",
+  "output_type": "Text",
   "input_tokens": 45,
   "prompt_tokens": 35,
   "attachment_tokens": 10,
@@ -268,6 +268,7 @@ Request:
     {
       "type": "document",
       "name": "brief.pdf",
+      "mime_type": "application/pdf",
       "size_bytes": 5242880,
       "pages": 4,
       "token_estimate": 10,
@@ -304,24 +305,24 @@ Base success response:
 
 Input attachment notes:
 
+- Text-like files are read locally and counted with `tiktoken`.
 - PDFs are parsed in the browser with `pdfjs-dist`; extracted text is counted with `tiktoken`.
 - Scanned PDFs with no extractable text use a local page-count fallback.
 - Images use local dimensions and a tile-based token estimate.
+- Audio, video, office documents, archives, and unknown binary files use a low-confidence size-based estimate.
 - File bytes and extracted text are not sent to the backend or n8n; only metadata and token estimates are included.
 
 Recommendation notes:
 
-- `Chat`, `Agent`, `App`, `Website`, `MCP`, and `Report/Document` recommendations use text-output models.
-- `Image` recommendations use image-output models only.
-- `Video` recommendations use video-output models only.
-- `Audiobook` recommendations use audio or speech-output models only.
+- Recommendations compare available catalog models by estimated cost, savings, confidence, and prompt strategy.
+- The selected output modality shapes the prompt strategy and labels, but recommendations are not hidden solely because catalog modality metadata is missing or incomplete.
 
 The backend may also include recommendation fields such as:
 
 ```json
 {
-  "recommended_mode": "Structured text and code planning",
-  "recommended_intent": "App",
+  "recommended_mode": "Text generation",
+  "recommended_intent": "Text",
   "optimized_prompt": "Objective: Build a dashboard...",
   "optimization_recommendations": [
     {

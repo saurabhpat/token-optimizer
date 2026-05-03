@@ -4,18 +4,31 @@ import { analyzeWithN8n } from "../services/n8nService.js";
 import { enrichAnalysisWithOptimizations } from "../services/optimizationService.js";
 
 const router = Router();
-const OUTPUT_TYPES = new Set([
-  "Chat",
-  "Agent",
-  "App",
-  "Website",
-  "MCP",
-  "Report/Document",
-  "Image",
-  "Video",
-  "Audiobook"
-]);
-const MEDIA_OUTPUT_TYPES = new Set(["Image", "Video", "Audiobook"]);
+const OUTPUT_TYPES = new Set(["Text", "File", "Image", "Audio", "Video"]);
+const OUTPUT_TYPE_ALIASES = {
+  Chat: "Text",
+  Agent: "Text",
+  App: "Text",
+  Website: "Text",
+  MCP: "Text",
+  "Report/Document": "File",
+  Audiobook: "Audio"
+};
+const NON_TEXT_OUTPUT_TYPES = new Set(["File", "Image", "Audio", "Video"]);
+
+function normalizeOutputType(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (OUTPUT_TYPES.has(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  return OUTPUT_TYPE_ALIASES[trimmedValue] ?? "";
+}
 
 function normalizeAttachment(attachment) {
   const type = typeof attachment?.type === "string" ? attachment.type.trim() : "";
@@ -29,6 +42,10 @@ function normalizeAttachment(attachment) {
   return {
     type,
     name,
+    mime_type:
+      typeof attachment?.mime_type === "string"
+        ? attachment.mime_type.trim()
+        : "",
     size_bytes: Number.isFinite(Number(attachment?.size_bytes))
       ? Number(attachment.size_bytes)
       : null,
@@ -54,11 +71,10 @@ function normalizeAttachment(attachment) {
 function validateRequestBody(body) {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
   const model = typeof body?.model === "string" ? body.model.trim() : "";
-  const intent = typeof body?.intent === "string" ? body.intent.trim() : "";
   const outputType =
-    typeof body?.output_type === "string" && OUTPUT_TYPES.has(body.output_type)
-      ? body.output_type
-      : "Chat";
+    normalizeOutputType(body?.output_type) ||
+    normalizeOutputType(body?.intent) ||
+    "Text";
   const inputTokens = Number(body?.input_tokens);
   const promptTokens = Number(body?.prompt_tokens);
   const attachmentTokens = Number(body?.attachment_tokens);
@@ -79,10 +95,6 @@ function validateRequestBody(body) {
     throw new AppError("Model is required.", 400);
   }
 
-  if (!intent) {
-    throw new AppError("Intent is required.", 400);
-  }
-
   if (!Number.isFinite(inputTokens) || inputTokens < 0) {
     throw new AppError("input_tokens must be a valid non-negative number.", 400);
   }
@@ -98,7 +110,7 @@ function validateRequestBody(body) {
   const payload = {
     prompt,
     model,
-    intent,
+    intent: outputType,
     output_type: outputType,
     input_tokens: inputTokens,
     prompt_tokens: Number.isFinite(promptTokens) && promptTokens >= 0 ? promptTokens : inputTokens,
@@ -126,7 +138,7 @@ function applyOutputTypePolicy(result, payload) {
     input_attachments: payload.input_attachments
   };
 
-  if (!MEDIA_OUTPUT_TYPES.has(payload.output_type)) {
+  if (!NON_TEXT_OUTPUT_TYPES.has(payload.output_type)) {
     return baseResult;
   }
 
@@ -147,7 +159,15 @@ function applyOutputTypePolicy(result, payload) {
 router.post("/", async (request, response, next) => {
   try {
     const { payload, candidateModels } = validateRequestBody(request.body);
-    const result = applyOutputTypePolicy(await analyzeWithN8n(payload), payload);
+    const upstreamResult = NON_TEXT_OUTPUT_TYPES.has(payload.output_type)
+      ? {
+          input_tokens: payload.input_tokens,
+          predicted_output: 0,
+          estimated_cost: 0.01,
+          optimization_tip: ""
+        }
+      : await analyzeWithN8n(payload);
+    const result = applyOutputTypePolicy(upstreamResult, payload);
     response.json(enrichAnalysisWithOptimizations(result, payload, candidateModels));
   } catch (error) {
     next(error);

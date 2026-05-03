@@ -21,14 +21,15 @@ export default function CalculationExplainer({
         </p>
         {hasAttachments ? (
           <p>
-            Attachment tokens are estimated locally. PDFs use extracted text
-            when available and page-count fallback for scanned documents; images
-            use dimensions and a tile-based vision estimate.
+            Attachment tokens are estimated locally. Text-like files are counted
+            directly, PDFs use extracted text or page-count fallback, images use
+            dimensions and a tile estimate, and other file types use a
+            low-confidence size-based estimate.
           </p>
         ) : null}
         <p>
           Predicted output is returned by the n8n estimator workflow for the
-          selected output goal{outputType ? ` (${outputType})` : ""}. This is a
+          selected output modality{outputType ? ` (${outputType})` : ""}. This is a
           planning estimate, not an actual selected-model completion.
         </p>
         <p>
