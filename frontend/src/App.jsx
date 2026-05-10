@@ -4,10 +4,9 @@ import AboutView from "./components/AboutView";
 import DashboardPanel from "./components/DashboardPanel";
 import InputAttachments from "./components/InputAttachments";
 import ModelSelector from "./components/ModelSelector";
-import OutputGoalSelector from "./components/OutputGoalSelector";
 import PromptInput from "./components/PromptInput";
+import ReasoningModeInput from "./components/ReasoningModeInput";
 import TopNav from "./components/TopNav";
-import { OUTPUT_GOAL_OPTIONS, normalizeOutputGoal } from "./constants/outputGoals";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { analyzePrompt, fetchModels } from "./lib/api";
 import { estimateAttachment } from "./lib/attachmentEstimator";
@@ -22,9 +21,7 @@ export default function App() {
   const [modelsState, setModelsState] = useState("loading");
   const [modelsError, setModelsError] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
-  const [selectedOutputGoal, setSelectedOutputGoal] = useState(
-    OUTPUT_GOAL_OPTIONS[0]
-  );
+  const [reasoningMode, setReasoningMode] = useState("");
   const [promptTokens, setPromptTokens] = useState(0);
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState("");
@@ -46,31 +43,6 @@ export default function App() {
   const hasImageAttachment = attachments.some(
     (attachment) => attachment.type === "image"
   );
-
-  function modelSupportsOutputGoal(model, outputGoal) {
-    const outputModalities = model?.output_modalities ?? [];
-
-    if (outputGoal === "Image") {
-      return outputModalities.includes("image");
-    }
-
-    if (outputGoal === "Video") {
-      return outputModalities.includes("video");
-    }
-
-    if (outputGoal === "Audio") {
-      return (
-        outputModalities.includes("audio") ||
-        outputModalities.includes("speech")
-      );
-    }
-
-    if (outputGoal === "File") {
-      return outputModalities.includes("file");
-    }
-
-    return outputModalities.includes("text");
-  }
 
   useEffect(() => {
     function handleHashChange() {
@@ -201,10 +173,6 @@ export default function App() {
       return "";
     }
 
-    if (!modelSupportsOutputGoal(selectedModel, selectedOutputGoal)) {
-      return `Catalog note: this model does not advertise ${selectedOutputGoal.toLowerCase()} output in the loaded metadata. You can still estimate it if OpenRouter supports this route.`;
-    }
-
     if (!modelSupportsInputAttachments(selectedModel)) {
       return "Catalog note: this model does not advertise image input in the loaded metadata.";
     }
@@ -246,13 +214,13 @@ export default function App() {
     resetAnalysis();
   }
 
-  function handleSelectOutputGoal(outputGoal) {
-    setSelectedOutputGoal(outputGoal);
+  function handleSelectModel(modelId) {
+    setSelectedModelId(modelId);
     resetAnalysis();
   }
 
-  function handleSelectModel(modelId) {
-    setSelectedModelId(modelId);
+  function handleReasoningModeChange(nextValue) {
+    setReasoningMode(nextValue);
     resetAnalysis();
   }
 
@@ -260,8 +228,7 @@ export default function App() {
     return {
       prompt: prompt.trim(),
       model: selectedModel.id,
-      intent: selectedOutputGoal,
-      output_type: selectedOutputGoal,
+      reasoning_mode: reasoningMode.trim(),
       input_tokens: inputTokens,
       prompt_tokens: promptTokens,
       attachment_tokens: attachmentTokens,
@@ -333,16 +300,8 @@ export default function App() {
       setSelectedModelId(recommendation.model_id);
     }
 
-    if (
-      typeof recommendation?.output_type === "string" &&
-      OUTPUT_GOAL_OPTIONS.includes(normalizeOutputGoal(recommendation.output_type))
-    ) {
-      setSelectedOutputGoal(normalizeOutputGoal(recommendation.output_type));
-    } else if (
-      typeof recommendation?.intent === "string" &&
-      OUTPUT_GOAL_OPTIONS.includes(normalizeOutputGoal(recommendation.intent))
-    ) {
-      setSelectedOutputGoal(normalizeOutputGoal(recommendation.intent));
+    if (typeof recommendation?.recommended_reasoning_mode === "string") {
+      setReasoningMode(recommendation.recommended_reasoning_mode);
     }
 
     startTransition(() => {
@@ -404,13 +363,6 @@ export default function App() {
                 />
 
                 <div className="grid gap-4 2xl:grid-cols-2">
-                  <div className="space-y-4">
-                    <OutputGoalSelector
-                      selectedGoal={selectedOutputGoal}
-                      onSelectGoal={handleSelectOutputGoal}
-                    />
-                  </div>
-
                   <ModelSelector
                     modelOptions={modelOptions}
                     selectedModelId={selectedModelId}
@@ -419,6 +371,10 @@ export default function App() {
                     isLoading={modelsState === "loading"}
                     errorMessage={modelsError}
                     warningMessage={modelCompatibilityWarning}
+                  />
+                  <ReasoningModeInput
+                    value={reasoningMode}
+                    onChange={handleReasoningModeChange}
                   />
                 </div>
 
@@ -445,7 +401,6 @@ export default function App() {
               result={analysisResult}
               errorMessage={analysisErrorMessage}
               selectedModel={selectedModel}
-              selectedOutputType={selectedOutputGoal}
               onUseRecommendation={handleUseRecommendation}
             />
           </div>

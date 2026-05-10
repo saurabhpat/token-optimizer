@@ -34,7 +34,7 @@ function LoadingState() {
       <Loader2 className="h-8 w-8 animate-spin text-primary" />
       <h2 className="mt-4 text-lg font-semibold text-ink">Estimating cost</h2>
       <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-        Waiting on the backend proxy and connected n8n workflow.
+        Running backend-native prompt inference and reasoning-mode estimation.
       </p>
     </div>
   );
@@ -136,7 +136,7 @@ function ResultsTabs({ tabs, activeTab, onChangeTab }) {
   );
 }
 
-function EstimateTab({ result, selectedModel, inputBreakdown, selectedOutputType }) {
+function EstimateTab({ result, selectedModel, inputBreakdown }) {
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
@@ -144,8 +144,35 @@ function EstimateTab({ result, selectedModel, inputBreakdown, selectedOutputType
         <div>
           <h2 className="text-sm font-semibold text-ink">Estimate ready</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            This projection reflects the selected model pricing and the upstream
-            n8n prediction.
+            This projection uses backend-native prompt inference, selected model
+            pricing, and reasoning-mode assumptions.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-border bg-white p-3">
+          <p className="text-xs font-semibold text-slate-500">Inferred output</p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            {result.output_type ?? "--"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-white p-3">
+          <p className="text-xs font-semibold text-slate-500">Artifact</p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            {result.artifact_type ?? "--"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-white p-3">
+          <p className="text-xs font-semibold text-slate-500">Reasoning mode</p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            {result.reasoning_mode_label ?? result.reasoning_mode_input ?? "Standard"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-white p-3">
+          <p className="text-xs font-semibold text-slate-500">Recommended</p>
+          <p className="mt-1 text-sm font-semibold text-ink">
+            {result.recommended_reasoning_mode ?? "--"}
           </p>
         </div>
       </div>
@@ -164,7 +191,7 @@ function EstimateTab({ result, selectedModel, inputBreakdown, selectedOutputType
       <CalculationExplainer
         selectedModel={selectedModel}
         inputBreakdown={inputBreakdown}
-        outputType={selectedOutputType}
+        result={result}
       />
     </div>
   );
@@ -235,6 +262,11 @@ function RecommendationsTab({
               <div>
                 <p className="font-semibold text-slate-500">Mode</p>
                 <p className="mt-1">{recommendation.mode}</p>
+                {recommendation.recommended_reasoning_mode ? (
+                  <p className="mt-1 leading-5 text-slate-500">
+                    Cheaper mode: {recommendation.recommended_reasoning_mode}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <p className="font-semibold text-slate-500">Accuracy</p>
@@ -369,7 +401,6 @@ function SuccessState({
   result,
   selectedModel,
   inputBreakdown,
-  selectedOutputType,
   onUseRecommendation
 }) {
   const tabs = useMemo(
@@ -407,7 +438,6 @@ function SuccessState({
           result={result}
           selectedModel={selectedModel}
           inputBreakdown={inputBreakdown}
-          selectedOutputType={selectedOutputType}
         />
       ) : null}
 
@@ -437,13 +467,18 @@ export default function DashboardPanel({
   result,
   errorMessage,
   selectedModel,
-  selectedOutputType,
   onUseRecommendation
 }) {
   const hasEstimate = state === "success" && result;
   const isLoading = state === "loading";
   const hasError = state === "error";
-  const outputValue = hasEstimate
+  const visibleOutputValue = hasEstimate
+    ? formatNullableNumber(result.visible_output_tokens)
+    : "--";
+  const reasoningOutputValue = hasEstimate
+    ? formatNullableNumber(result.reasoning_token_estimate)
+    : "--";
+  const billableOutputValue = hasEstimate
     ? formatNullableNumber(result.predicted_output)
     : "--";
   const costValue = hasEstimate
@@ -471,7 +506,7 @@ export default function DashboardPanel({
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-5">
           <StatCard
             label="Input Tokens"
             value={formatNumber(inputTokens)}
@@ -482,9 +517,19 @@ export default function DashboardPanel({
             }
           />
           <StatCard
-            label="Predicted Output"
-            value={outputValue}
-            hint="Returned by analysis"
+            label="Visible Output"
+            value={visibleOutputValue}
+            hint="User-facing content"
+          />
+          <StatCard
+            label="Reasoning"
+            value={reasoningOutputValue}
+            hint="Mode overhead"
+          />
+          <StatCard
+            label="Billable Output"
+            value={billableOutputValue}
+            hint="Visible + reasoning"
           />
           <StatCard
             label="Estimated Cost"
@@ -503,7 +548,6 @@ export default function DashboardPanel({
               result={result}
               selectedModel={selectedModel}
               inputBreakdown={inputBreakdown}
-              selectedOutputType={selectedOutputType}
               onUseRecommendation={onUseRecommendation}
             />
           ) : null}

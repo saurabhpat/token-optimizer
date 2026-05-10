@@ -20,9 +20,9 @@ const VALUE_PROPS = [
 
 const STEPS = [
   "Write or paste the prompt you plan to run.",
-  "Choose the model and primary intent.",
-  "Run the estimate through the backend and n8n workflow.",
-  "Use the recommendation, optimized prompt, or cost comparison."
+  "Choose the model and optionally enter a reasoning mode.",
+  "Run the backend-native estimate with inferred output type.",
+  "Use the recommendation, optimized prompt, mode advice, or cost comparison."
 ];
 
 export default function AboutView({ onOpenOptimizer }) {
@@ -88,8 +88,8 @@ export default function AboutView({ onOpenOptimizer }) {
             </div>
           </div>
           <p className="border-t border-border pt-4 text-sm leading-6 text-slate-600">
-            The backend keeps webhook and provider configuration server-side,
-            while the UI focuses on fast comparison and practical next steps.
+            The backend keeps provider configuration server-side, while the UI
+            focuses on fast comparison and practical next steps.
           </p>
         </div>
       </section>

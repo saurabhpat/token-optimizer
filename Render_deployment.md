@@ -1,6 +1,6 @@
 # TokenOptimizer Render Deployment Guide
 
-This guide explains how to deploy TokenOptimizer on Render with GitHub as the source repository, Render hosting both app services, and n8n handling the analysis workflow.
+This guide explains how to deploy TokenOptimizer on Render with GitHub as the source repository, Render hosting both app services, and the Express backend performing backend-native cost estimation.
 
 Production architecture:
 
@@ -8,16 +8,11 @@ Production architecture:
 Browser
   -> Render Static Site: React frontend
   -> Render Web Service: Express backend
-  -> n8n production webhook
-  -> OpenRouter credential inside n8n
+  -> OpenRouter public model catalog
+  -> Optional OpenRouter estimator call from backend
 ```
 
-Keep this separation:
-
-- The frontend is public and must not contain private webhook URLs or API keys.
-- The backend stores the private n8n webhook URL in Render environment variables.
-- n8n stores the OpenRouter credential.
-- GitHub stores source code only.
+The current app no longer requires n8n for the live analysis path. The `n8n/` folder remains only as a legacy workflow template.
 
 ## 1. Prerequisites
 
@@ -25,46 +20,12 @@ Before starting, confirm you have:
 
 - A GitHub repository with this project pushed.
 - A Render account connected to GitHub.
-- An active n8n workflow imported from `n8n/TokenOptimizer Workflow.json`.
-- An OpenRouter credential rebound inside the n8n `Call OpenRouter` node.
-- Your production n8n webhook URL.
+- Node.js services enabled in your Render account.
+- Optional: an OpenRouter API key if you want backend estimator calls instead of deterministic-only fallback.
 
-Use the production n8n webhook:
+You do not need an n8n Cloud instance for the main app.
 
-```text
-https://your-n8n-domain/webhook/token-optimizer
-```
-
-Do not use the test webhook for deployment:
-
-```text
-https://your-n8n-domain/webhook-test/token-optimizer
-```
-
-## 2. Confirm n8n Is Ready
-
-In n8n:
-
-1. Import `n8n/TokenOptimizer Workflow.json`.
-2. Open the `Call OpenRouter` node.
-3. Select your own OpenRouter credential.
-4. Confirm the webhook path is:
-
-   ```text
-   token-optimizer
-   ```
-
-5. Activate the workflow.
-6. Copy the production webhook URL.
-
-The committed workflow is intentionally safe for GitHub:
-
-- It is inactive by default.
-- It does not contain your private webhook URL.
-- It does not contain OpenRouter API keys.
-- It does not contain bound credential IDs.
-
-## 3. Deploy The Backend As A Render Web Service
+## 2. Deploy The Backend As A Render Web Service
 
 The backend must be a Render Web Service because it is an Express API.
 
@@ -84,14 +45,15 @@ Start Command: npm run start
 Instance Type: Free
 ```
 
-Render can provide the runtime `PORT` automatically. The backend also supports an explicit `PORT` variable if you choose to set one.
+Render provides `PORT` automatically. You can omit `PORT` unless you have a specific reason to set it.
 
 Recommended backend environment variables:
 
 ```env
-N8N_WEBHOOK_URL=https://your-n8n-domain/webhook/token-optimizer
-N8N_TIMEOUT_MS=30000
 CLIENT_ORIGIN=https://your-frontend-service.onrender.com
+OPENROUTER_API_KEY=
+OPENROUTER_ESTIMATOR_MODEL=openrouter/free
+OPENROUTER_TIMEOUT_MS=25000
 ```
 
 Optional local-plus-production CORS configuration:
@@ -100,15 +62,13 @@ Optional local-plus-production CORS configuration:
 CLIENT_ORIGIN=https://your-frontend-service.onrender.com,http://localhost:5173
 ```
 
-If you set `PORT` manually, keep it consistent with your Render service configuration:
+Notes:
 
-```env
-PORT=3000
-```
+- `OPENROUTER_API_KEY` is optional. Leave it blank to use deterministic backend estimation only.
+- If you set `OPENROUTER_API_KEY`, store it only in Render environment variables.
+- Do not add secrets to GitHub source files.
 
-Do not add these values to GitHub source files.
-
-## 4. Verify The Backend
+## 3. Verify The Backend
 
 After the backend deploy finishes, open:
 
@@ -153,7 +113,7 @@ Expected response shape:
 
 If `/api/health` works but `/api/models` fails, the backend is running but cannot reach the OpenRouter model catalog.
 
-## 5. Deploy The Frontend As A Render Static Site
+## 4. Deploy The Frontend As A Render Static Site
 
 The frontend must be a Render Static Site because it is a Vite React app.
 
@@ -185,9 +145,9 @@ VITE_API_BASE_URL=https://token-optimizer-api.onrender.com
 
 `VITE_API_BASE_URL` is not a secret. It is the public backend URL that the browser calls.
 
-After adding or changing this variable, redeploy the frontend. Vite reads `VITE_*` variables at build time, so the value is baked into the generated static assets.
+After adding or changing this variable, redeploy the frontend. Vite reads `VITE_*` variables at build time, so the value is baked into generated static assets.
 
-## 6. Update Backend CORS After Frontend URL Exists
+## 5. Update Backend CORS After Frontend URL Exists
 
 After the frontend deploy finishes, copy the frontend URL from Render.
 
@@ -213,7 +173,7 @@ CLIENT_ORIGIN=https://token-optimizer.onrender.com,http://localhost:5173
 
 Redeploy or restart the backend after changing `CLIENT_ORIGIN`.
 
-## 7. End-To-End Verification
+## 6. End-To-End Verification
 
 Open the deployed frontend:
 
@@ -221,161 +181,101 @@ Open the deployed frontend:
 https://your-frontend-service.onrender.com
 ```
 
-Test the flow:
+Use this smoke test:
 
-1. Confirm the model dropdown loads models.
-2. Enter a prompt.
-3. Select an output goal.
-4. Select a model.
-5. Click **Estimate cost**.
-6. Confirm the dashboard shows:
-   - Input tokens
-   - Predicted output
-   - Estimated cost
-   - Optimization guidance
-   - Recommendations
+1. Enter a prompt:
 
-The expected runtime path is:
+   ```text
+   Create a concise app plan for a project management dashboard with tasks, sprint status, budget tracking, and team workload.
+   ```
 
-```text
-Frontend /api/models request
-  -> Render backend
-  -> OpenRouter public model catalog
+2. Select a text-capable model.
+3. Optionally enter a reasoning mode such as `Fast` or `Pro`.
+4. Click **Estimate cost**.
+5. Confirm the dashboard shows:
+   - input tokens
+   - visible output estimate
+   - reasoning token estimate
+   - billable output estimate
+   - estimated cost
+   - inferred output type
+   - model and mode recommendations
 
-Frontend /api/analyze request
-  -> Render backend
-  -> n8n production webhook
-  -> OpenRouter credential inside n8n
-```
+## 7. Troubleshooting
 
-## 8. Troubleshooting
-
-### Frontend Shows "No Models Available" Or "Failed To Fetch"
-
-Open browser DevTools and check the failed request.
-
-If it points to localhost:
-
-```text
-http://localhost:3000/api/models
-```
-
-then the frontend Render environment variable is missing or stale.
-
-Fix:
-
-```env
-VITE_API_BASE_URL=https://your-backend-service.onrender.com
-```
-
-Redeploy the frontend after setting it.
-
-### Browser Console Shows A CORS Error
-
-Example:
-
-```text
-Access to fetch at 'https://your-backend-service.onrender.com/api/models'
-from origin 'https://your-frontend-service.onrender.com'
-has been blocked by CORS policy.
-```
-
-Fix the backend environment variable:
-
-```env
-CLIENT_ORIGIN=https://your-frontend-service.onrender.com
-```
-
-No trailing slash. Redeploy the backend.
-
-### `/api/health` Returns Not Found
-
-Make sure you are using the full HTTPS URL:
-
-```text
-https://your-backend-service.onrender.com/api/health
-```
-
-If it still returns `Not Found`, verify the backend service settings:
-
-```text
-Service Type: Web Service
-Root Directory: backend
-Build Command: npm install
-Start Command: npm run start
-```
-
-### `/api/health` Works But `/api/models` Fails
-
-The backend is alive, but it cannot fetch the OpenRouter model catalog.
-
-Check Render logs for errors such as:
-
-```text
-Unable to reach OpenRouter.
-The model catalog request timed out.
-OpenRouter returned invalid JSON.
-```
-
-Wait and retry if OpenRouter is temporarily unavailable.
-
-### Estimate Fails But Model Catalog Works
-
-This usually means the backend can run but n8n is not returning the expected response.
+### Frontend Shows `Failed to fetch` For Models
 
 Check:
 
-- `N8N_WEBHOOK_URL` uses `/webhook/token-optimizer`, not `/webhook-test/token-optimizer`.
-- The n8n workflow is active.
-- The n8n `Call OpenRouter` node has your OpenRouter credential selected.
-- The n8n workflow returns valid JSON with:
+- `VITE_API_BASE_URL` is set to the backend URL, not the frontend URL.
+- The frontend was redeployed after setting `VITE_API_BASE_URL`.
+- The backend `/api/health` URL works.
+- `CLIENT_ORIGIN` on the backend exactly matches the frontend origin.
 
-```json
-{
-  "input_tokens": 100,
-  "predicted_output": 300,
-  "estimated_cost": 0.0012,
-  "optimization_tip": "Tip text"
-}
+### Browser Console Shows CORS Error
+
+Set backend `CLIENT_ORIGIN` to the frontend URL with no trailing slash.
+
+Correct:
+
+```env
+CLIENT_ORIGIN=https://token-optimizer.onrender.com
 ```
 
-### OpenRouter Says Too Many Requests
+Incorrect:
 
-The workflow uses OpenRouter's free router for low-cost estimates. Free models can be rate-limited.
+```env
+CLIENT_ORIGIN=https://token-optimizer.onrender.com/
+```
 
-Expected behavior:
+For local and production:
 
-- n8n retries the OpenRouter call.
-- If OpenRouter still fails, the workflow falls back to a heuristic estimate.
+```env
+CLIENT_ORIGIN=https://token-optimizer.onrender.com,http://localhost:5173
+```
 
-If this happens often, wait and retry later or use a paid OpenRouter model/route inside n8n.
+Restart the backend after changing this value.
 
-### Render Free Service Feels Slow
+### Estimate Works But Mentions Deterministic Fallback
 
-Render free web services can spin down after inactivity. The next request wakes the service and can take about a minute.
+This is allowed. It means `OPENROUTER_API_KEY` is not configured, OpenRouter rejected the optional estimator request, or the estimator timed out. The backend still returns a usable local estimate.
 
-This is normal on the free tier. Refresh once the backend has woken up.
+To enable OpenRouter estimator calls:
 
-## 9. Safe Configuration Checklist
+```env
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_ESTIMATOR_MODEL=openrouter/free
+OPENROUTER_TIMEOUT_MS=25000
+```
 
-Before sharing the deployed app:
+If your OpenRouter account has no credits or the free route is rate-limited, the app falls back automatically.
+
+### Render Free Service Sleeps
+
+Free Render Web Services can sleep after inactivity. The first request after sleep may be slow. Open `/api/health` once before testing the frontend if the app has been idle.
+
+### Model Catalog Is Empty
+
+Open:
 
 ```text
-[ ] Backend /api/health returns {"status":"ok"}
-[ ] Backend /api/models returns model data
-[ ] Frontend has VITE_API_BASE_URL set to backend URL
-[ ] Backend has CLIENT_ORIGIN set to frontend URL
-[ ] Backend has N8N_WEBHOOK_URL set to production n8n webhook
-[ ] n8n workflow is active
-[ ] n8n OpenRouter credential is rebound
-[ ] No .env files are committed
-[ ] No OpenRouter keys are committed
-[ ] No private webhook URLs are committed
+https://your-backend-service.onrender.com/api/models
 ```
 
-## 10. Useful Render References
+If it returns an error, Render may be blocked from reaching OpenRouter or OpenRouter may be temporarily unavailable. Wait and retry; the frontend depends on this endpoint for the model dropdown.
 
-- Render Web Services: https://render.com/docs/web-services
-- Render Static Sites: https://render.com/docs/static-sites
-- Deploy Node Express on Render: https://render.com/docs/deploy-node-express-app
-- Render Free Plan behavior: https://render.com/docs/free
+## 8. Deployment Checklist
+
+```text
+[ ] Backend Web Service root directory is backend
+[ ] Backend start command is npm run start
+[ ] Frontend Static Site root directory is frontend
+[ ] Frontend publish directory is dist
+[ ] VITE_API_BASE_URL points to the backend service
+[ ] CLIENT_ORIGIN points to the frontend service
+[ ] Optional OPENROUTER_API_KEY is set only in Render
+[ ] /api/health returns {"status":"ok"}
+[ ] /api/models returns model data
+[ ] Frontend estimate flow works
+[ ] No .env, API keys, logs, node_modules, or dist files are committed
+```

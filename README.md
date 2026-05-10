@@ -1,29 +1,19 @@
 # TokenOptimizer
 
-TokenOptimizer is a full-stack web application for estimating LLM usage cost before running a prompt. It helps builders compare model economics, understand prompt and attachment token impact, and get cheaper model/prompt recommendations before sending work to an LLM.
+TokenOptimizer is a full-stack web application for estimating LLM usage cost before running a prompt. It helps builders understand prompt size, attachment token impact, output-token risk, reasoning-mode overhead, and cheaper model or prompt alternatives before spending credits.
 
-The app is built as a monorepo with a React frontend, an Express backend, and an importable n8n workflow. The frontend counts prompt and attachment input tokens locally. The backend proxies analysis requests to n8n and fetches the public OpenRouter model catalog, keeping private webhook URLs and API credentials out of the browser bundle.
+The app is built as a monorepo with a React frontend and an Express backend. The frontend counts prompt and attachment input tokens locally. The backend fetches the live OpenRouter model catalog and performs backend-native estimation with deterministic fallback, so the app remains usable even when optional OpenRouter estimator calls are unavailable.
 
-Use TokenOptimizer when you want to:
+## What It Does
 
-- Check expected LLM cost before running a prompt-heavy task
-- Compare model pricing across Text, File, Image, Audio, and Video output modalities
-- Estimate local attachment token impact without uploading file contents
-- Generate model-specific prompt optimization guidance
-- Keep vendor keys and webhook URLs in server-side configuration
-
-## Features
-
-- Live prompt token counting with `tiktoken`
-- Searchable OpenRouter model catalog
-- Input and output price display per 1K tokens
-- Modality-first output goal selection for Text, File, Image, Audio, and Video estimates
-- Local attachment estimation for text files, PDFs, images, media, and generic files without sending file bytes to the backend
-- Backend proxy to an n8n webhook for low-cost estimates
-- Cost estimate dashboard with loading, success, empty, and error states
-- Top 5 cost-optimized model recommendations
-- Per-model optimized prompt output with token and cost deltas
-- Copy optimized prompt and use recommended model plus prompt from the UI
+- Counts prompt tokens locally with `tiktoken`.
+- Estimates attachment token impact locally without uploading file bytes.
+- Loads live OpenRouter model names, modality metadata, and pricing.
+- Infers likely output type from the prompt instead of requiring a manual goal selector.
+- Accepts an optional free-text reasoning mode such as `Fast`, `Pro`, `Thinking`, `Adaptive Thinking`, or `budget_tokens=2048`.
+- Estimates visible output tokens, reasoning/thinking token overhead, total billable output tokens, and total cost.
+- Recommends cheaper model and reasoning-mode alternatives.
+- Produces optimized prompt variants with token and cost deltas.
 
 ## Tech Stack
 
@@ -46,8 +36,8 @@ Backend:
 
 External services:
 
-- n8n webhook workflow
-- OpenRouter model catalog and estimator model calls through n8n
+- OpenRouter public model catalog
+- Optional OpenRouter estimator call from the backend
 
 ## Project Structure
 
@@ -64,34 +54,30 @@ token-optimizer/
     server.js
     package.json
     .env.example
-  dev/
-    mock-webhook.cjs
-    static-server.cjs
   n8n/
     TokenOptimizer Workflow.json
+  PRODUCT_ONE_PAGER.md
+  Render_deployment.md
   README.md
 ```
 
-## Prerequisites
+The `n8n/` folder is retained as a legacy reference template. The main app no longer requires n8n to run.
 
-Install these before running the project:
+## Prerequisites
 
 - Node.js 18 or newer
 - npm
-- A running n8n workflow with a production webhook URL
-- An OpenRouter API key configured inside n8n if your workflow calls OpenRouter
-- Git, if you plan to push the project to GitHub
+- Git
+- Optional: an OpenRouter API key if you want the backend to call an estimator model
 
 Recommended local ports:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:3000`
-- Optional mock webhook: `http://localhost:3001`
 
 ## Environment Variables
 
-Sensitive values are intentionally configured outside the committed source code.
-Do not commit `backend/.env`, `frontend/.env`, OpenRouter API keys, n8n credential exports, access tokens, or private webhook URLs.
+Sensitive values are intentionally configured outside committed source code. Do not commit `.env` files, OpenRouter API keys, access tokens, logs, `node_modules`, or build output.
 
 Create your backend environment file:
 
@@ -111,19 +97,21 @@ Backend `.env`:
 
 ```env
 PORT=3000
-N8N_WEBHOOK_URL=https://your-n8n-domain.example/webhook/token-optimizer
-N8N_TIMEOUT_MS=30000
 CLIENT_ORIGIN=http://localhost:5173
+OPENROUTER_API_KEY=
+OPENROUTER_ESTIMATOR_MODEL=openrouter/free
+OPENROUTER_TIMEOUT_MS=25000
 ```
 
 Variable notes:
 
 - `PORT`: backend port.
-- `N8N_WEBHOOK_URL`: your production n8n webhook that receives analysis payloads. Replace the example host with your own n8n Cloud or self-hosted domain.
-- `N8N_TIMEOUT_MS`: timeout for the backend-to-n8n request.
 - `CLIENT_ORIGIN`: comma-separated allowed frontend origins for CORS.
+- `OPENROUTER_API_KEY`: optional. When present, the backend can call OpenRouter for structured estimation.
+- `OPENROUTER_ESTIMATOR_MODEL`: optional estimator model. Defaults to `openrouter/free`.
+- `OPENROUTER_TIMEOUT_MS`: timeout for optional estimator calls.
 
-Create your frontend environment file if you want to override the default backend URL:
+Create your frontend environment file only if you want to override the default backend URL:
 
 ```bash
 cd token-optimizer/frontend
@@ -136,35 +124,7 @@ Frontend `.env`:
 VITE_API_BASE_URL=http://localhost:3000
 ```
 
-The frontend does not need API keys. Keep OpenRouter credentials inside n8n and keep the n8n webhook URL in the backend only.
-
-## Fork Setup Checklist
-
-If you fork this repository:
-
-1. Import `n8n/TokenOptimizer Workflow.json` into your own n8n workspace.
-2. Create or select your own OpenRouter credential inside n8n.
-3. Activate the workflow and copy its production webhook URL.
-4. Create `backend/.env` from `backend/.env.example`.
-5. Set `N8N_WEBHOOK_URL` to your own webhook URL.
-6. Set `CLIENT_ORIGIN` to your frontend URL, such as `http://localhost:5173` locally.
-7. Create `frontend/.env` from `frontend/.env.example` only if your backend is not running at `http://localhost:3000`.
-8. Run `git status --short` before pushing and confirm no `.env`, logs, `node_modules`, or `dist` files are staged.
-
-Example backend configuration for a fork:
-
-```env
-PORT=3000
-N8N_WEBHOOK_URL=https://your-n8n-domain.example/webhook/token-optimizer
-N8N_TIMEOUT_MS=30000
-CLIENT_ORIGIN=http://localhost:5173
-```
-
-Example production frontend configuration:
-
-```env
-VITE_API_BASE_URL=https://your-backend-domain.example
-```
+The frontend never needs API keys.
 
 ## Installation
 
@@ -198,264 +158,160 @@ cd token-optimizer/frontend
 npm run dev
 ```
 
-Open the app:
+Open:
 
 ```text
 http://localhost:5173
 ```
 
-## Optional Mock Webhook
-
-Use the mock webhook when your n8n workflow is unavailable and you only want to test the app UI and backend contract.
-
-Start the mock webhook:
-
-```bash
-cd token-optimizer
-node dev/mock-webhook.cjs
-```
-
-Point the backend `.env` to the mock:
-
-```env
-N8N_WEBHOOK_URL=http://127.0.0.1:3001/
-```
-
-Restart the backend after changing `.env`.
-
 ## API Overview
 
-### Health Check
+### `GET /api/health`
 
-```http
-GET /api/health
+Returns:
+
+```json
+{ "status": "ok" }
 ```
 
-Response:
+### `GET /api/models`
+
+Returns OpenRouter catalog data normalized for the frontend:
 
 ```json
 {
-  "status": "ok"
-}
-```
-
-### Model Catalog
-
-```http
-GET /api/models
-```
-
-Returns normalized OpenRouter model metadata used by the frontend selector.
-
-### Analyze Prompt
-
-```http
-POST /api/analyze
-```
-
-Request:
-
-```json
-{
-  "prompt": "Build a dashboard for tracking SaaS costs.",
-  "model": "google/gemini-2.5-flash",
-  "intent": "Text",
-  "output_type": "Text",
-  "input_tokens": 45,
-  "prompt_tokens": 35,
-  "attachment_tokens": 10,
-  "input_attachments": [
+  "data": [
     {
-      "type": "document",
-      "name": "brief.pdf",
-      "mime_type": "application/pdf",
-      "size_bytes": 5242880,
-      "pages": 4,
-      "token_estimate": 10,
-      "confidence": "high",
-      "method": "pdf_text_extraction"
-    }
-  ],
-  "input_price": 0.000075,
-  "output_price": 0.0003,
-  "candidate_models": [
-    {
-      "id": "google/gemini-2.5-flash",
-      "name": "Google: Gemini 2.5 Flash",
-      "input_price": 0.0003,
-      "output_price": 0.0025,
-      "context_length": 1048576,
+      "id": "openai/gpt-4o-mini",
+      "name": "OpenAI: GPT-4o-mini",
+      "input_price": 0.0015,
+      "output_price": 0.002,
       "input_modalities": ["text"],
-      "output_modalities": ["text"]
+      "output_modalities": ["text"],
+      "context_length": 128000
     }
   ]
 }
 ```
 
-Base success response:
+### `POST /api/analyze`
+
+Required payload fields:
 
 ```json
 {
-  "input_tokens": 45,
-  "predicted_output": 300,
-  "estimated_cost": 0.0012,
-  "optimization_tip": "Recommended mode: Structured text and code planning..."
+  "prompt": "Create a concise app plan...",
+  "model": "openai/gpt-4o-mini",
+  "input_tokens": 120,
+  "prompt_tokens": 120,
+  "attachment_tokens": 0,
+  "input_attachments": [],
+  "input_price": 0.0015,
+  "output_price": 0.002
 }
 ```
 
-Input attachment notes:
-
-- Text-like files are read locally and counted with `tiktoken`.
-- PDFs are parsed in the browser with `pdfjs-dist`; extracted text is counted with `tiktoken`.
-- Scanned PDFs with no extractable text use a local page-count fallback.
-- Images use local dimensions and a tile-based token estimate.
-- Audio, video, office documents, archives, and unknown binary files use a low-confidence size-based estimate.
-- File bytes and extracted text are not sent to the backend or n8n; only metadata and token estimates are included.
-
-Recommendation notes:
-
-- Recommendations compare available catalog models by estimated cost, savings, confidence, and prompt strategy.
-- The selected output modality shapes the prompt strategy and labels, but recommendations are not hidden solely because catalog modality metadata is missing or incomplete.
-
-The backend may also include recommendation fields such as:
+Optional field:
 
 ```json
 {
-  "recommended_mode": "Text generation",
-  "recommended_intent": "Text",
-  "optimized_prompt": "Objective: Build a dashboard...",
-  "optimization_recommendations": [
-    {
-      "model": "Example Model",
-      "model_id": "provider/model-id",
-      "mode": "Structured text and code planning",
-      "estimated_cost": 0.0004,
-      "savings_percent": 75,
-      "confidence_score": 0.72,
-      "accuracy": "Medium",
-      "prompt_strategy": "Implementation prompt with requirements, constraints, and acceptance checks",
-      "optimized_prompt": "Objective: Build a dashboard...",
-      "optimized_input_tokens": 92,
-      "optimized_token_change": -13,
-      "optimized_estimated_cost": 0.0003,
-      "optimized_cost_change": -0.0001,
-      "changes_made": [
-        "Separated objective, context, constraints, and output format."
-      ]
-    }
-  ]
+  "reasoning_mode": "Pro"
 }
 ```
 
-Error response:
+Success response keeps the stable contract:
 
 ```json
 {
-  "error": "message"
+  "input_tokens": 120,
+  "predicted_output": 900,
+  "estimated_cost": 0.00198,
+  "optimization_tip": "..."
 }
 ```
 
-## n8n Workflow
+Additional optional fields may include:
 
-An importable workflow file is included at:
+- `output_type`
+- `artifact_type`
+- `visible_output_tokens`
+- `reasoning_token_estimate`
+- `reasoning_mode_label`
+- `recommended_reasoning_mode`
+- `reasoning_mode_rationale`
+- `mode_cost_delta`
+- `optimization_recommendations`
 
-```text
-n8n/TokenOptimizer Workflow.json
-```
+## Reasoning Mode Input
 
-The checked-in workflow is a safe import template. It is intentionally inactive
-and does not include exported n8n workflow IDs, webhook IDs, or bound credential
-IDs/names.
+The reasoning mode textbox is optional estimation metadata. It does not guarantee a provider execution setting; it helps TokenOptimizer estimate how much extra thinking or reasoning overhead a prompt may incur.
 
-After importing it into n8n:
+Examples:
 
-1. Configure or rebind your OpenRouter credential in n8n.
-2. Confirm the webhook path is `token-optimizer`.
-3. Activate the workflow for production use.
-4. Use the production webhook URL in `backend/.env`.
+- `Fast`
+- `low`
+- `Balanced`
+- `Thinking`
+- `Adaptive Thinking`
+- `Pro`
+- `high`
+- `budget_tokens=2048`
 
-Do not commit n8n credential exports, private webhook URLs, or workflow exports
-that include instance-specific IDs. Keep OpenRouter keys inside n8n credentials.
+If left empty, the backend automatically selects a reasonable bucket from prompt complexity and artifact type.
 
-The backend expects n8n to return:
+## Attachment Estimation
 
-```json
-{
-  "input_tokens": 45,
-  "predicted_output": 300,
-  "estimated_cost": 0.0012,
-  "optimization_tip": "A useful optimization suggestion."
-}
-```
+Attachments stay local in the browser. The frontend sends only metadata and token estimates to the backend.
 
-## Production Notes
+- Text-like files are counted from local text extraction.
+- PDFs use local text extraction when available.
+- Scanned PDFs use page-count fallback.
+- Images use dimensions and a tile estimate.
+- Other file types use a low-confidence size-based estimate.
 
-- Keep all API keys and webhook URLs in backend environment variables.
-- Do not expose OpenRouter keys in the frontend.
-- Set `CLIENT_ORIGIN` to your deployed frontend URL.
-- Set `VITE_API_BASE_URL` to your deployed backend URL before building the frontend.
-- Use the n8n production webhook path, not the test webhook path, for deployed use.
+## Production Deployment
 
-Build the frontend:
+The recommended free-friendly deployment path is Render:
+
+- Render Static Site for the frontend.
+- Render Web Service for the backend.
+- OpenRouter key stored only in backend environment variables if estimator calls are enabled.
+
+See [Render_deployment.md](./Render_deployment.md) for the full deployment guide.
+
+## Legacy n8n Workflow
+
+`n8n/TokenOptimizer Workflow.json` is retained as a legacy import template from earlier versions of the project. It should not contain private workflow IDs, webhook IDs, credential IDs, API keys, or private webhook URLs.
+
+The current app does not require n8n. Do not configure `N8N_WEBHOOK_URL` for the main backend unless you are experimenting with the legacy workflow yourself.
+
+## Security Notes
+
+- Never expose API keys in the frontend.
+- Do not commit `.env` files.
+- Do not commit OpenRouter keys, bearer tokens, private webhook URLs, logs, `node_modules`, or `dist`.
+- Backend CORS should include only trusted frontend origins.
+- File bytes and extracted attachment text are not sent to the backend.
+
+## Useful Commands
+
+Frontend build:
 
 ```bash
 cd token-optimizer/frontend
 npm run build
 ```
 
-Run the backend in production mode:
+Backend start:
 
 ```bash
 cd token-optimizer/backend
 npm run start
 ```
 
-## GitHub Push Guide
-
-From the `token-optimizer` folder:
+Backend syntax check:
 
 ```bash
-git init
-git add .
-git commit -m "Initial TokenOptimizer app"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
-git push -u origin main
+cd token-optimizer/backend
+node --check server.js
 ```
-
-Before pushing:
-
-- Confirm `.env` files are not staged.
-- Confirm `node_modules/` and `dist/` are not staged.
-- Confirm runtime logs are not staged.
-- Review `backend/.env.example` and `frontend/.env.example` so other developers know what to configure.
-
-Useful check:
-
-```bash
-git status --short
-```
-
-## Troubleshooting
-
-If the frontend cannot load models:
-
-- Confirm the backend is running on `http://localhost:3000`.
-- Confirm `VITE_API_BASE_URL` points to the backend.
-- Check `GET http://localhost:3000/api/health`.
-
-If analysis fails:
-
-- Confirm `N8N_WEBHOOK_URL` is a production webhook URL.
-- Confirm the n8n workflow is active.
-- Confirm the n8n workflow returns valid JSON with the four required fields.
-- Increase `N8N_TIMEOUT_MS` if your estimator model is slow.
-
-If CORS fails:
-
-- Confirm `CLIENT_ORIGIN=http://localhost:5173` for local development.
-- For production, set `CLIENT_ORIGIN` to your deployed frontend URL.
-
-## License
-
-No license has been selected yet. Add a `LICENSE` file before publishing if this repository should be open source.

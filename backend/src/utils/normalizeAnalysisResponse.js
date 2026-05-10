@@ -56,7 +56,11 @@ export function normalizeAnalysisResponse(payload) {
   for (const key of [
     "predicted_output_min",
     "predicted_output_max",
-    "prediction_confidence"
+    "prediction_confidence",
+    "visible_output_tokens",
+    "reasoning_token_estimate",
+    "mode_cost_delta",
+    "mode_cost_delta_tokens"
   ]) {
     const numericValue = Number(response[key]);
 
@@ -65,7 +69,18 @@ export function normalizeAnalysisResponse(payload) {
     }
   }
 
-  for (const key of ["prediction_method", "prediction_notes"]) {
+  for (const key of [
+    "prediction_method",
+    "prediction_notes",
+    "artifact_type",
+    "reasoning_mode_input",
+    "reasoning_mode_bucket",
+    "reasoning_mode_label",
+    "recommended_reasoning_mode",
+    "recommended_reasoning_mode_bucket",
+    "reasoning_mode_rationale",
+    "mode_selection_criteria"
+  ]) {
     if (typeof response[key] === "string" && response[key].trim()) {
       normalizedResponse[key] = response[key].trim();
     }

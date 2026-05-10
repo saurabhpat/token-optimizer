@@ -171,7 +171,9 @@ function getModeLabel(outputType, intent) {
     return "File generation";
   }
 
-  return "Text generation";
+  return intent && intent !== outputType
+    ? `${intent} text generation`
+    : "Text generation";
 }
 
 function getModelCapabilityProfile(model) {
@@ -576,9 +578,15 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
     ? candidateModels.map(normalizeCandidateModel).filter(Boolean)
     : [];
   const selectedOutputType = getSelectedOutputType(payload);
-  const recommendedIntent = selectedOutputType;
+  const recommendedIntent = result.artifact_type || payload.intent || selectedOutputType;
   const promptProfile = analyzePrompt(payload.prompt, selectedOutputType);
-  const mode = getModeLabel(selectedOutputType, recommendedIntent);
+  const selectedReasoningMode =
+    result.reasoning_mode_label ||
+    result.reasoning_mode_input ||
+    "Auto";
+  const recommendedReasoningMode =
+    result.recommended_reasoning_mode || selectedReasoningMode;
+  const mode = `${getModeLabel(selectedOutputType, recommendedIntent)} · ${selectedReasoningMode}`;
 
   if (normalizedCandidates.length === 0) {
     return {
@@ -646,6 +654,16 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
         intent: recommendedIntent,
         output_type: selectedOutputType,
         mode,
+        reasoning_mode: selectedReasoningMode,
+        recommended_reasoning_mode: recommendedReasoningMode,
+        reasoning_mode_rationale: result.reasoning_mode_rationale,
+        mode_selection_criteria: result.mode_selection_criteria,
+        mode_cost_delta: Number(
+          (
+            toFiniteNumber(result.mode_cost_delta_tokens) *
+            (model.output_price / 1000)
+          ).toFixed(6)
+        ),
         estimated_cost: estimatedCost,
         cost_change: Number((estimatedCost - selectedCost).toFixed(6)),
         savings,
@@ -658,7 +676,7 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
           recommendedIntent,
           selectedOutputType,
           promptProfile
-        ),
+        ) + ` Recommended reasoning mode: ${recommendedReasoningMode}.`,
         optimized_prompt: optimizedPrompt,
         optimized_input_tokens: optimizedInputTokens,
         optimized_token_change: optimizedInputTokens - originalInputTokens,
@@ -671,7 +689,11 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
           recommendedIntent,
           selectedOutputType,
           promptProfile
-        ),
+        ).concat(
+          result.mode_selection_criteria
+            ? [`Reasoning mode guidance: ${result.mode_selection_criteria}`]
+            : []
+        ).slice(0, 6),
         confidence_basis: [
           modelProfile.isFree ? "free-tier route" : "paid route",
           modelProfile.isPremium
@@ -680,7 +702,8 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
               ? "lightweight model family"
               : "general model family",
           `${promptProfile.complexity} prompt complexity`,
-          `${selectedOutputType} output`
+          `${selectedOutputType} output`,
+          `${selectedReasoningMode} reasoning mode`
         ].join(", ")
       };
     })
@@ -699,14 +722,18 @@ export function enrichAnalysisWithOptimizations(result, payload, candidateModels
   return {
     ...result,
     optimization_tip:
-      `Recommended mode: ${mode}. Best ${selectedOutputType} option: ${best.model} at ${formatCurrency(
+      `${result.optimization_tip} Best ${selectedOutputType} model option: ${best.model} at ${formatCurrency(
         best.estimated_cost
       )}, about ${formatPercent(best.savings_percent)} lower than the selected estimate. Confidence: ${Math.round(
         best.confidence_score * 100
-      )}%. Prompt change: ${promptRevision}`,
+      )}%. Recommended reasoning mode: ${recommendedReasoningMode}. Mode criteria: ${
+        result.mode_selection_criteria || "Use the cheapest mode that preserves task reliability."
+      } Prompt change: ${promptRevision}`,
     output_type: selectedOutputType,
+    artifact_type: recommendedIntent,
     recommended_mode: mode,
     recommended_intent: recommendedIntent,
+    recommended_reasoning_mode: recommendedReasoningMode,
     prompt_revision: promptRevision,
     optimized_prompt: best.optimized_prompt,
     optimization_recommendations: recommendations

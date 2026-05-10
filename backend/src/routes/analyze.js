@@ -1,34 +1,9 @@
 import { Router } from "express";
 import { AppError } from "../middleware/errorHandler.js";
-import { analyzeWithN8n } from "../services/n8nService.js";
+import { analyzeWithBackendEstimator } from "../services/analysisEstimatorService.js";
 import { enrichAnalysisWithOptimizations } from "../services/optimizationService.js";
 
 const router = Router();
-const OUTPUT_TYPES = new Set(["Text", "File", "Image", "Audio", "Video"]);
-const OUTPUT_TYPE_ALIASES = {
-  Chat: "Text",
-  Agent: "Text",
-  App: "Text",
-  Website: "Text",
-  MCP: "Text",
-  "Report/Document": "File",
-  Audiobook: "Audio"
-};
-const NON_TEXT_OUTPUT_TYPES = new Set(["File", "Image", "Audio", "Video"]);
-
-function normalizeOutputType(value) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  const trimmedValue = value.trim();
-
-  if (OUTPUT_TYPES.has(trimmedValue)) {
-    return trimmedValue;
-  }
-
-  return OUTPUT_TYPE_ALIASES[trimmedValue] ?? "";
-}
 
 function normalizeAttachment(attachment) {
   const type = typeof attachment?.type === "string" ? attachment.type.trim() : "";
@@ -71,15 +46,13 @@ function normalizeAttachment(attachment) {
 function validateRequestBody(body) {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
   const model = typeof body?.model === "string" ? body.model.trim() : "";
-  const outputType =
-    normalizeOutputType(body?.output_type) ||
-    normalizeOutputType(body?.intent) ||
-    "Text";
   const inputTokens = Number(body?.input_tokens);
   const promptTokens = Number(body?.prompt_tokens);
   const attachmentTokens = Number(body?.attachment_tokens);
   const inputPrice = Number(body?.input_price);
   const outputPrice = Number(body?.output_price);
+  const reasoningMode =
+    typeof body?.reasoning_mode === "string" ? body.reasoning_mode.trim() : "";
   const inputAttachments = Array.isArray(body?.input_attachments)
     ? body.input_attachments.map(normalizeAttachment).filter(Boolean)
     : [];
@@ -110,8 +83,7 @@ function validateRequestBody(body) {
   const payload = {
     prompt,
     model,
-    intent: outputType,
-    output_type: outputType,
+    reasoning_mode: reasoningMode,
     input_tokens: inputTokens,
     prompt_tokens: Number.isFinite(promptTokens) && promptTokens >= 0 ? promptTokens : inputTokens,
     attachment_tokens:
@@ -129,46 +101,19 @@ function validateRequestBody(body) {
   };
 }
 
-function applyOutputTypePolicy(result, payload) {
-  const baseResult = {
-    ...result,
-    output_type: payload.output_type,
-    prompt_tokens: payload.prompt_tokens,
-    attachment_tokens: payload.attachment_tokens,
-    input_attachments: payload.input_attachments
-  };
-
-  if (!NON_TEXT_OUTPUT_TYPES.has(payload.output_type)) {
-    return baseResult;
-  }
-
-  return {
-    ...baseResult,
-    predicted_output: 0,
-    predicted_output_min: 0,
-    predicted_output_max: 0,
-    estimated_cost: 0.01,
-    optimization_tip:
-      `Flat unit pricing applied for ${payload.output_type} output. ` +
-      "Recommendations are restricted to models that advertise this output modality.",
-    prediction_method: "backend_flat_unit_multimodal",
-    prediction_confidence: 0.74
-  };
-}
-
 router.post("/", async (request, response, next) => {
   try {
     const { payload, candidateModels } = validateRequestBody(request.body);
-    const upstreamResult = NON_TEXT_OUTPUT_TYPES.has(payload.output_type)
-      ? {
-          input_tokens: payload.input_tokens,
-          predicted_output: 0,
-          estimated_cost: 0.01,
-          optimization_tip: ""
-        }
-      : await analyzeWithN8n(payload);
-    const result = applyOutputTypePolicy(upstreamResult, payload);
-    response.json(enrichAnalysisWithOptimizations(result, payload, candidateModels));
+    const result = await analyzeWithBackendEstimator(payload);
+    const enrichedPayload = {
+      ...payload,
+      intent: result.artifact_type,
+      output_type: result.output_type
+    };
+
+    response.json(
+      enrichAnalysisWithOptimizations(result, enrichedPayload, candidateModels)
+    );
   } catch (error) {
     next(error);
   }

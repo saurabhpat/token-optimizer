@@ -4,9 +4,10 @@ import { formatPrice } from "../lib/formatters";
 export default function CalculationExplainer({
   selectedModel,
   inputBreakdown,
-  outputType
+  result
 }) {
   const hasAttachments = Number(inputBreakdown?.attachment_tokens) > 0;
+  const outputType = result?.output_type;
 
   return (
     <details className="rounded-lg border border-border bg-soft px-4 py-3 text-sm">
@@ -28,14 +29,22 @@ export default function CalculationExplainer({
           </p>
         ) : null}
         <p>
-          Predicted output is returned by the n8n estimator workflow for the
-          selected output modality{outputType ? ` (${outputType})` : ""}. This is a
-          planning estimate, not an actual selected-model completion.
+          Output type is inferred from the prompt and attachment metadata
+          {outputType ? ` (${outputType})` : ""}. Visible output tokens estimate
+          the user-facing answer, while reasoning tokens estimate optional
+          thinking or pro-mode overhead.
         </p>
         <p>
           Estimated cost uses: input tokens x input price / 1,000 plus
-          predicted output x output price / 1,000.
+          billable output tokens x output price / 1,000. Billable output is
+          visible output plus reasoning/thinking tokens when they apply.
         </p>
+        {result?.reasoning_mode_rationale ? (
+          <p>{result.reasoning_mode_rationale}</p>
+        ) : null}
+        {result?.mode_selection_criteria ? (
+          <p>{result.mode_selection_criteria}</p>
+        ) : null}
         {selectedModel ? (
           <p className="text-slate-500">
             Current prices: {formatPrice(selectedModel.input_price)} input and{" "}
