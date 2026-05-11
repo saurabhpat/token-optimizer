@@ -4,6 +4,8 @@ TokenOptimizer is a full-stack web application for estimating LLM usage cost bef
 
 The app is built as a monorepo with a React frontend and an Express backend. The frontend counts prompt and attachment input tokens locally. The backend fetches the live OpenRouter model catalog and performs backend-native estimation with deterministic fallback, so the app remains usable even when optional OpenRouter estimator calls are unavailable.
 
+TokenOptimizer is an estimator and decision-support tool. It does not guarantee exact provider billing and does not run the selected model as part of the main estimate flow.
+
 ## What It Does
 
 - Counts prompt tokens locally with `tiktoken`.
@@ -14,6 +16,12 @@ The app is built as a monorepo with a React frontend and an Express backend. The
 - Estimates visible output tokens, reasoning/thinking token overhead, total billable output tokens, and total cost.
 - Recommends cheaper model and reasoning-mode alternatives.
 - Produces optimized prompt variants with token and cost deltas.
+
+## Product Documentation
+
+- [TOKENOPTIMIZER_PRD.md](./TOKENOPTIMIZER_PRD.md): full product requirements document covering problem, solution, model architecture, prompts, guardrails, evals, success metrics, GTM, and monetization options.
+- [PRODUCT_ONE_PAGER.md](./PRODUCT_ONE_PAGER.md): concise product brief for quick review.
+- [Render_deployment.md](./Render_deployment.md): step-by-step Render deployment guide.
 
 ## Tech Stack
 
@@ -57,6 +65,7 @@ token-optimizer/
   n8n/
     TokenOptimizer Workflow.json
   PRODUCT_ONE_PAGER.md
+  TOKENOPTIMIZER_PRD.md
   Render_deployment.md
   README.md
 ```
@@ -257,7 +266,27 @@ Examples:
 - `high`
 - `budget_tokens=2048`
 
-If left empty, the backend automatically selects a reasonable bucket from prompt complexity and artifact type.
+If left empty, the backend uses `Standard` mode. This avoids silently upgrading the user into a higher-cost thinking mode unless they explicitly ask for it.
+
+## How The Estimate Works
+
+TokenOptimizer separates the estimate into plain-language parts:
+
+- `Prompt + file tokens`: input size counted or estimated locally.
+- `Estimated Output Tokens`: the answer size the user is likely to see.
+- `Thinking mode cost`: estimated extra reasoning tokens from modes such as Thinking, Pro, or custom token budgets.
+- `Total output tokens`: estimated answer tokens plus thinking tokens.
+- `Estimated price`: input cost plus output cost using the selected model prices.
+
+For text-like outputs, the main formula is:
+
+```text
+Estimated price =
+input tokens x input price / 1,000
++ total output tokens x output price / 1,000
+```
+
+For image, audio, and video-style outputs, TokenOptimizer uses the input-token cost plus a modality-aware output estimate rather than pretending every output behaves like normal text.
 
 ## Attachment Estimation
 
@@ -289,7 +318,7 @@ The current app does not require n8n. Do not configure `N8N_WEBHOOK_URL` for the
 
 - Never expose API keys in the frontend.
 - Do not commit `.env` files.
-- Do not commit OpenRouter keys, bearer tokens, private webhook URLs, logs, `node_modules`, or `dist`.
+- Do not commit OpenRouter keys, authorization tokens, private webhook URLs, logs, `node_modules`, or `dist`.
 - Backend CORS should include only trusted frontend origins.
 - File bytes and extracted attachment text are not sent to the backend.
 
