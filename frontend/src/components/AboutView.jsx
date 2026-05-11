@@ -1,4 +1,11 @@
-import { ArrowRight, Gauge, LineChart, Sparkles, WalletCards } from "lucide-react";
+import {
+  ArrowRight,
+  Calculator,
+  Gauge,
+  LineChart,
+  Sparkles,
+  WalletCards
+} from "lucide-react";
 
 const VALUE_PROPS = [
   {
@@ -23,6 +30,16 @@ const STEPS = [
   "Choose the model and optionally enter a reasoning mode.",
   "Run the backend-native estimate with inferred output type.",
   "Use the recommendation, optimized prompt, mode advice, or cost comparison."
+];
+
+const CALCULATION_STEPS = [
+  "Prompt and attachment tokens are counted locally in your browser.",
+  "The backend reads the prompt and infers the likely output type.",
+  "TokenOptimizer estimates the answer size the user will actually see.",
+  "Reasoning mode adds extra thinking tokens when Fast, Standard, Thinking, Pro, or a custom token budget is used.",
+  "Total output tokens are answer tokens plus any thinking-mode tokens.",
+  "The selected model's input and output prices are applied per 1,000 tokens.",
+  "Recommendations compare cheaper model, reasoning mode, and prompt options."
 ];
 
 export default function AboutView({ onOpenOptimizer }) {
@@ -133,6 +150,38 @@ export default function AboutView({ onOpenOptimizer }) {
             ))}
           </ol>
         </div>
+
+        <details className="mt-5 rounded-lg border border-border bg-soft px-4 py-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-ink">
+            <Calculator className="h-4 w-4 text-primary" />
+            How TokenOptimizer calculates cost
+          </summary>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.72fr)]">
+            <ol className="grid gap-3 sm:grid-cols-2">
+              {CALCULATION_STEPS.map((step, index) => (
+                <li key={step} className="flex gap-3 text-sm leading-6 text-slate-600">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="rounded-lg border border-border bg-white p-4">
+              <p className="text-sm font-semibold text-ink">Simple formula</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Estimated price = input tokens x input price / 1,000 + total
+                output tokens x output price / 1,000.
+              </p>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                Total output tokens means the estimated answer tokens plus any
+                extra thinking-mode tokens. For media-style outputs, the app
+                uses the selected model pricing and a modality-aware estimate
+                instead of pretending every output is normal text.
+              </p>
+            </div>
+          </div>
+        </details>
       </section>
     </main>
   );

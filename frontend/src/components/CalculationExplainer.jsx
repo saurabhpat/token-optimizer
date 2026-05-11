@@ -17,27 +17,33 @@ export default function CalculationExplainer({
       </summary>
       <div className="mt-3 space-y-2 leading-6 text-slate-600">
         <p>
-          Prompt tokens are counted locally in the browser with tiktoken after a
-          short debounce.
+          Prompt tokens are counted in your browser after a short pause, so the
+          app can price the text you are about to send.
         </p>
         {hasAttachments ? (
           <p>
-            Attachment tokens are estimated locally. Text-like files are counted
-            directly, PDFs use extracted text or page-count fallback, images use
-            dimensions and a tile estimate, and other file types use a
-            low-confidence size-based estimate.
+            File tokens are also estimated locally. Text files are counted from
+            their content, PDFs use extracted text or a page-count estimate,
+            images use their dimensions, and unknown file types use a
+            size-based estimate.
           </p>
         ) : null}
         <p>
-          Output type is inferred from the prompt and attachment metadata
-          {outputType ? ` (${outputType})` : ""}. Visible output tokens estimate
-          the user-facing answer, while reasoning tokens estimate optional
-          thinking or pro-mode overhead.
+          TokenOptimizer infers the likely output type
+          {outputType ? ` (${outputType})` : ""}. Estimated Output Token Cost is
+          the estimated size of the answer you will see, such as a report,
+          plan, message, or code response.
         </p>
         <p>
-          Estimated cost uses: input tokens x input price / 1,000 plus
-          billable output tokens x output price / 1,000. Billable output is
-          visible output plus reasoning/thinking tokens when they apply.
+          Thinking mode cost is the extra estimated token usage for modes such
+          as Fast, Standard, Thinking, Pro, or an explicit token budget. These
+          tokens may not appear in the final answer, but they can still affect
+          cost.
+        </p>
+        <p>
+          Estimated price = input tokens x input price / 1,000 + total output
+          tokens x output price / 1,000. Total output tokens means answer tokens
+          plus any extra thinking tokens.
         </p>
         {result?.reasoning_mode_rationale ? (
           <p>{result.reasoning_mode_rationale}</p>

@@ -16,8 +16,8 @@ import StatCard from "./StatCard";
 
 function EmptyState() {
   return (
-    <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-white px-6 py-10 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-soft text-primary">
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-white px-5 py-8 text-center">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-soft text-primary">
         <BarChart3 className="h-5 w-5" />
       </div>
       <h2 className="text-lg font-semibold text-ink">Ready to compare</h2>
@@ -30,7 +30,7 @@ function EmptyState() {
 
 function LoadingState() {
   return (
-    <div className="flex min-h-[260px] flex-col items-center justify-center rounded-lg border border-border bg-white px-6 py-10 text-center">
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-border bg-white px-5 py-8 text-center">
       <Loader2 className="h-8 w-8 animate-spin text-primary" />
       <h2 className="mt-4 text-lg font-semibold text-ink">Estimating cost</h2>
       <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
@@ -42,7 +42,7 @@ function LoadingState() {
 
 function ErrorState({ message }) {
   return (
-    <div className="min-h-[260px] rounded-lg border border-rose-200 bg-rose-50 px-6 py-10">
+    <div className="min-h-[220px] rounded-lg border border-rose-200 bg-rose-50 px-5 py-8">
       <div className="flex items-center gap-3 text-rose-700">
         <AlertCircle className="h-6 w-6" />
         <h2 className="text-lg font-semibold">Estimate failed</h2>
@@ -138,38 +138,38 @@ function ResultsTabs({ tabs, activeTab, onChangeTab }) {
 
 function EstimateTab({ result, selectedModel, inputBreakdown }) {
   return (
-    <div className="space-y-4">
-      <div className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+    <div className="space-y-3">
+      <div className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
         <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
         <div>
           <h2 className="text-sm font-semibold text-ink">Estimate ready</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-600">
-            This projection uses backend-native prompt inference, selected model
-            pricing, and reasoning-mode assumptions.
+          <p className="mt-1 text-sm leading-5 text-slate-600">
+            This estimate combines your prompt size, selected model prices,
+            likely answer length, and optional thinking-mode cost.
           </p>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-border bg-white p-3">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-lg border border-border bg-white px-3 py-2.5">
           <p className="text-xs font-semibold text-slate-500">Inferred output</p>
           <p className="mt-1 text-sm font-semibold text-ink">
             {result.output_type ?? "--"}
           </p>
         </div>
-        <div className="rounded-lg border border-border bg-white p-3">
+        <div className="rounded-lg border border-border bg-white px-3 py-2.5">
           <p className="text-xs font-semibold text-slate-500">Artifact</p>
           <p className="mt-1 text-sm font-semibold text-ink">
             {result.artifact_type ?? "--"}
           </p>
         </div>
-        <div className="rounded-lg border border-border bg-white p-3">
+        <div className="rounded-lg border border-border bg-white px-3 py-2.5">
           <p className="text-xs font-semibold text-slate-500">Reasoning mode</p>
           <p className="mt-1 text-sm font-semibold text-ink">
             {result.reasoning_mode_label ?? result.reasoning_mode_input ?? "Standard"}
           </p>
         </div>
-        <div className="rounded-lg border border-border bg-white p-3">
+        <div className="rounded-lg border border-border bg-white px-3 py-2.5">
           <p className="text-xs font-semibold text-slate-500">Recommended</p>
           <p className="mt-1 text-sm font-semibold text-ink">
             {result.recommended_reasoning_mode ?? "--"}
@@ -177,12 +177,12 @@ function EstimateTab({ result, selectedModel, inputBreakdown }) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+      <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-primary">
           <Sparkles className="h-4 w-4" />
           Optimization strategy
         </div>
-        <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
+        <p className="mt-2 max-h-28 overflow-y-auto whitespace-pre-line pr-1 text-sm leading-6 text-slate-700">
           {result.optimization_tip}
         </p>
       </div>
@@ -212,7 +212,7 @@ function RecommendationsTab({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {recommendations.map((recommendation, index) => {
         const isSelected = recommendation.model_id === selectedRecommendationId;
 
@@ -222,14 +222,14 @@ function RecommendationsTab({
             type="button"
             onClick={() => onSelectRecommendation(recommendation.model_id)}
             className={[
-              "w-full rounded-lg border p-4 text-left transition",
+              "w-full rounded-lg border p-3 text-left transition",
               isSelected
                 ? "border-primary bg-blue-50"
                 : "border-border bg-white hover:border-blue-200 hover:bg-soft"
             ].join(" ")}
           >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-primary">
                     {index + 1}
@@ -243,7 +243,7 @@ function RecommendationsTab({
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2 text-xs">
+              <div className="flex shrink-0 flex-wrap gap-2 text-xs">
                 <span className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 font-medium text-slate-600">
                   <WalletCards className="h-3.5 w-3.5 text-primary" />
                   {formatPrice(recommendation.estimated_cost)}
@@ -258,10 +258,10 @@ function RecommendationsTab({
               </div>
             </div>
 
-            <div className="mt-3 grid gap-3 text-xs text-slate-600 sm:grid-cols-3">
+            <div className="mt-2 grid gap-2 text-xs text-slate-600 lg:grid-cols-[0.85fr_0.85fr_1.3fr]">
               <div>
                 <p className="font-semibold text-slate-500">Mode</p>
-                <p className="mt-1">{recommendation.mode}</p>
+                <p className="mt-1 leading-5">{recommendation.mode}</p>
                 {recommendation.recommended_reasoning_mode ? (
                   <p className="mt-1 leading-5 text-slate-500">
                     Cheaper mode: {recommendation.recommended_reasoning_mode}
@@ -270,7 +270,7 @@ function RecommendationsTab({
               </div>
               <div>
                 <p className="font-semibold text-slate-500">Accuracy</p>
-                <p className="mt-1">{recommendation.accuracy}</p>
+                <p className="mt-1 leading-5">{recommendation.accuracy}</p>
                 {recommendation.confidence_basis ? (
                   <p className="mt-1 leading-5 text-slate-500">
                     {recommendation.confidence_basis}
@@ -279,14 +279,14 @@ function RecommendationsTab({
               </div>
               <div>
                 <p className="font-semibold text-slate-500">Prompt strategy</p>
-                <p className="mt-1 leading-5">
+                <p className="mt-1 max-h-10 overflow-hidden leading-5">
                   {recommendation.prompt_strategy ??
                     recommendation.prompt_change}
                 </p>
               </div>
             </div>
 
-            <div className="mt-3 flex justify-end">
+            <div className="mt-2 flex justify-end">
               <span
                 className="text-xs font-semibold text-primary"
                 onClick={(event) => {
@@ -351,12 +351,12 @@ function PromptTab({ recommendation, onUseRecommendation }) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+      <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
         <div className="rounded-lg bg-soft p-4">
           <p className="mb-2 text-xs font-semibold text-slate-500">
             Ready-to-use prompt
           </p>
-          <pre className="max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-ink">
+          <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-ink">
             {recommendation.optimized_prompt}
           </pre>
         </div>
@@ -430,7 +430,7 @@ function SuccessState({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <ResultsTabs tabs={tabs} activeTab={activeTab} onChangeTab={setActiveTab} />
 
       {activeTab === "Estimate" ? (
@@ -486,29 +486,25 @@ export default function DashboardPanel({
     : "--";
 
   return (
-    <aside className="lg:sticky lg:top-20">
-      <div className="max-h-none rounded-lg border border-border bg-surface p-5 shadow-panel lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-        <div className="mb-5 flex items-start justify-between gap-4">
+    <aside>
+      <div className="rounded-lg border border-border bg-surface p-4 shadow-panel">
+        <div className="mb-3 flex items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.08em] text-primary">
-              Decision panel
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+              Cost estimate
             </p>
-            <h1 className="mt-2 text-2xl font-semibold text-ink">
-              TokenOptimizer
-            </h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
-              Estimate usage, compare model economics, and sanity-check prompt
-              cost before you execute.
+            <p className="mt-1 text-sm text-slate-500">
+              Key cost numbers and recommendations.
             </p>
           </div>
-          <div className="hidden h-12 w-12 items-center justify-center rounded-lg border border-border bg-soft text-primary sm:flex">
+          <div className="hidden h-10 w-10 items-center justify-center rounded-lg border border-border bg-soft text-primary sm:flex">
             <BarChart3 className="h-5 w-5" />
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard
-            label="Input Tokens"
+            label="Prompt + file tokens"
             value={formatNumber(inputTokens)}
             hint={
               inputBreakdown?.attachment_tokens > 0
@@ -517,28 +513,28 @@ export default function DashboardPanel({
             }
           />
           <StatCard
-            label="Visible Output"
+            label="Estimated Output Tokens"
             value={visibleOutputValue}
-            hint="User-facing content"
+            hint="What you will see"
           />
           <StatCard
-            label="Reasoning"
+            label="Thinking mode cost"
             value={reasoningOutputValue}
-            hint="Mode overhead"
+            hint="Extra thinking tokens"
           />
           <StatCard
-            label="Billable Output"
+            label="Total output tokens"
             value={billableOutputValue}
-            hint="Visible + reasoning"
+            hint="Answer + thinking"
           />
           <StatCard
-            label="Estimated Cost"
+            label="Estimated price"
             value={costValue}
-            hint="Input + output"
+            hint="Prompt + answer"
           />
         </div>
 
-        <div className="mt-5">
+        <div className="mt-3">
           {isLoading ? <LoadingState /> : null}
           {!isLoading && hasError ? (
             <ErrorState message={errorMessage} />

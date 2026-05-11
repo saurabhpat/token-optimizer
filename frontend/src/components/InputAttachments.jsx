@@ -81,10 +81,10 @@ export default function InputAttachments({
 
   return (
     <section className="space-y-2">
-      <div className="flex flex-col gap-3 rounded-lg border border-border bg-soft px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-soft px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-ink">Input attachments</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
+          <p className="mt-0.5 text-xs leading-5 text-slate-500">
             Any file stays local; only token metadata is analyzed.
           </p>
         </div>
@@ -113,16 +113,16 @@ export default function InputAttachments({
       ) : null}
 
       {attachments.length > 0 ? (
-        <div className="space-y-2">
+        <div className="max-h-32 space-y-2 overflow-y-auto pr-1">
           {attachments.map((attachment) => {
             const Icon = getAttachmentIcon(attachment.type);
 
             return (
               <div
                 key={attachment.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-white px-3 py-2"
+                className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2"
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-primary">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-50 text-primary">
                   <Icon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1 sm:flex sm:items-center sm:justify-between sm:gap-3">
@@ -144,7 +144,7 @@ export default function InputAttachments({
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(attachment.id)}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
                   aria-label={`Remove ${attachment.name}`}
                 >
                   <X className="h-4 w-4" />

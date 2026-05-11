@@ -11,7 +11,7 @@ export default function TopNav({ activeView, onChangeView }) {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
         <button
           type="button"
-          onClick={() => onChangeView("optimizer")}
+          onClick={() => onChangeView("about")}
           className="flex items-center gap-3 text-left"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-soft text-primary">

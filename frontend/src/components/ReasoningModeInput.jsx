@@ -2,7 +2,7 @@ import { BrainCircuit } from "lucide-react";
 
 export default function ReasoningModeInput({ value, onChange }) {
   return (
-    <section className="space-y-3">
+    <section className="space-y-2">
       <div>
         <label
           className="text-sm font-semibold text-ink"
@@ -10,12 +10,12 @@ export default function ReasoningModeInput({ value, onChange }) {
         >
           Reasoning mode
         </label>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-0.5 text-xs leading-5 text-slate-500">
           Optional estimation hint for thinking or pro modes.
         </p>
       </div>
 
-      <div className="flex items-center rounded-lg border border-border bg-white px-3 py-3 text-sm text-ink transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 sm:px-4">
+      <div className="flex items-center rounded-lg border border-border bg-white px-3 py-2.5 text-sm text-ink transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 sm:px-4">
         <BrainCircuit className="mr-3 h-4 w-4 shrink-0 text-primary" />
         <input
           id="reasoning-mode"

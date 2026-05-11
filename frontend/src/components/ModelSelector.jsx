@@ -111,20 +111,20 @@ export default function ModelSelector({
   const showResults = isOpen && !isLoading && modelOptions.length > 0;
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-2">
       <div>
         <p className="text-sm font-semibold text-ink">Model</p>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-0.5 text-xs leading-5 text-slate-500">
           Search the live OpenRouter catalog.
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         <label className="sr-only" htmlFor="model-selector">
           Model selector
         </label>
         <div ref={rootRef} className="relative">
-          <div className="flex min-w-0 items-center rounded-lg border border-border bg-white px-3 py-3 text-sm text-ink transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 sm:px-4">
+          <div className="flex min-w-0 items-center rounded-lg border border-border bg-white px-3 py-2.5 text-sm text-ink transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 sm:px-4">
             <Search className="mr-3 h-4 w-4 shrink-0 text-slate-400" />
             <input
               id="model-selector"
@@ -162,7 +162,7 @@ export default function ModelSelector({
             <div
               id="model-selector-results"
               role="listbox"
-              className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-white py-2 shadow-xl"
+              className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-border bg-white py-2 shadow-xl"
             >
               {filteredModels.length > 0 ? (
                 filteredModels.map((model, index) => {

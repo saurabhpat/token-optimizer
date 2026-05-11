@@ -14,7 +14,7 @@ import { countTokens } from "./lib/tokenCounter";
 
 export default function App() {
   const [activeView, setActiveView] = useState(() =>
-    window.location.hash === "#about" ? "about" : "optimizer"
+    window.location.hash === "#optimizer" ? "optimizer" : "about"
   );
   const [prompt, setPrompt] = useState("");
   const [modelOptions, setModelOptions] = useState([]);
@@ -46,7 +46,7 @@ export default function App() {
 
   useEffect(() => {
     function handleHashChange() {
-      setActiveView(window.location.hash === "#about" ? "about" : "optimizer");
+      setActiveView(window.location.hash === "#optimizer" ? "optimizer" : "about");
     }
 
     window.addEventListener("hashchange", handleHashChange);
@@ -327,25 +327,25 @@ export default function App() {
       {activeView === "about" ? (
         <AboutView onOpenOptimizer={() => handleChangeView("optimizer")} />
       ) : (
-        <main className="mx-auto max-w-[1440px] px-3 py-5 sm:px-5 lg:px-6 xl:px-8 xl:py-8">
-          <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+        <main className="mx-auto max-w-[1480px] px-3 py-4 sm:px-5 lg:px-6 xl:px-8">
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-primary">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
                 Optimizer workspace
               </p>
-              <h1 className="mt-1 text-3xl font-semibold text-ink">
+              <h1 className="mt-1 text-2xl font-semibold text-ink lg:text-3xl">
                 Estimate cost before scaling usage.
               </h1>
             </div>
-            <p className="max-w-2xl text-sm leading-6 text-slate-600">
+            <p className="max-w-xl text-sm leading-6 text-slate-600">
               Estimate prompt cost with live model pricing and optimization
               guidance before you execute.
             </p>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(420px,0.92fr)_minmax(0,1.3fr)] 2xl:grid-cols-[minmax(520px,0.95fr)_minmax(0,1.25fr)]">
-            <section className="rounded-lg border border-border bg-white p-4 shadow-panel sm:p-5 xl:sticky xl:top-20 xl:self-start">
-              <div className="space-y-5">
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(420px,0.88fr)_minmax(0,1.35fr)] 2xl:grid-cols-[minmax(500px,0.9fr)_minmax(0,1.35fr)]">
+            <section className="rounded-lg border border-border bg-white p-4 shadow-panel">
+              <div className="space-y-3">
                 <PromptInput
                   prompt={prompt}
                   inputTokens={promptTokens}
@@ -362,7 +362,7 @@ export default function App() {
                   onRemoveAttachment={handleRemoveAttachment}
                 />
 
-                <div className="grid gap-4 2xl:grid-cols-2">
+                <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                   <ModelSelector
                     modelOptions={modelOptions}
                     selectedModelId={selectedModelId}
@@ -378,7 +378,7 @@ export default function App() {
                   />
                 </div>
 
-                <div className="space-y-3">
+                <div className="pt-1">
                   <AnalyzeButton
                     disabled={isActionDisabled}
                     isLoading={analysisState === "loading"}
