@@ -1,8 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, DollarSign, Search } from "lucide-react";
+import { Check, ChevronDown, DollarSign, RefreshCw, Search } from "lucide-react";
 import { formatPrice } from "../lib/formatters";
 
 const MAX_VISIBLE_MODELS = 80;
+
+function formatRefreshTime(value) {
+  if (!value) {
+    return "Not loaded yet";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Recently";
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
 
 export default function ModelSelector({
   modelOptions,
@@ -10,6 +27,9 @@ export default function ModelSelector({
   selectedModel,
   onChange,
   isLoading,
+  isRefreshing,
+  lastRefreshedAt,
+  onRefresh,
   errorMessage,
   warningMessage
 }) {
@@ -112,11 +132,27 @@ export default function ModelSelector({
 
   return (
     <section className="space-y-2">
-      <div>
-        <p className="text-sm font-semibold text-ink">Model</p>
-        <p className="mt-0.5 text-xs leading-5 text-slate-500">
-          Search the live OpenRouter catalog.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink">Model</p>
+          <p className="mt-0.5 text-xs leading-5 text-slate-500">
+            Search the live OpenRouter catalog.
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Last refreshed: {formatRefreshTime(lastRefreshedAt)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={isLoading || isRefreshing}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-primary transition hover:border-primary/40 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw
+            className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`}
+          />
+          Refresh
+        </button>
       </div>
 
       <div className="space-y-2">

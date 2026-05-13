@@ -51,10 +51,16 @@ export async function fetchModels() {
   const models = data.data.filter(isValidModelPayload);
 
   if (models.length === 0) {
-    throw new Error("No billable OpenRouter models are currently available.");
+    throw new Error("No OpenRouter models are currently available.");
   }
 
-  return models;
+  return {
+    models,
+    refreshedAt:
+      typeof data?.refreshed_at === "string" && data.refreshed_at.trim()
+        ? data.refreshed_at
+        : new Date().toISOString()
+  };
 }
 
 export async function analyzePrompt(payload) {

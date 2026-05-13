@@ -1,4 +1,11 @@
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import AnalyzeButton from "./components/AnalyzeButton";
 import AboutView from "./components/AboutView";
 import DashboardPanel from "./components/DashboardPanel";
@@ -12,6 +19,8 @@ import { analyzePrompt, fetchModels } from "./lib/api";
 import { estimateAttachment } from "./lib/attachmentEstimator";
 import { countTokens } from "./lib/tokenCounter";
 
+const MODEL_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+
 export default function App() {
   const [activeView, setActiveView] = useState(() =>
     window.location.hash === "#optimizer" ? "optimizer" : "about"
@@ -20,6 +29,8 @@ export default function App() {
   const [modelOptions, setModelOptions] = useState([]);
   const [modelsState, setModelsState] = useState("loading");
   const [modelsError, setModelsError] = useState("");
+  const [modelsLastRefreshedAt, setModelsLastRefreshedAt] = useState("");
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [reasoningMode, setReasoningMode] = useState("");
   const [promptTokens, setPromptTokens] = useState(0);
@@ -30,6 +41,7 @@ export default function App() {
   const [analysisState, setAnalysisState] = useState("idle");
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState("");
+  const modelOptionsRef = useRef([]);
 
   const deferredPrompt = useDeferredValue(prompt);
   const debouncedPrompt = useDebouncedValue(deferredPrompt, 300);
@@ -43,6 +55,10 @@ export default function App() {
   const hasImageAttachment = attachments.some(
     (attachment) => attachment.type === "image"
   );
+
+  useEffect(() => {
+    modelOptionsRef.current = modelOptions;
+  }, [modelOptions]);
 
   useEffect(() => {
     function handleHashChange() {
@@ -69,41 +85,66 @@ export default function App() {
     });
   }
 
-  useEffect(() => {
-    let isCurrent = true;
+  const loadModels = useCallback(
+    async ({ keepExistingOnError = false, background = false } = {}) => {
+      const hasExistingModels = modelOptionsRef.current.length > 0;
 
-    async function loadModels() {
+      if (!background && !hasExistingModels) {
+        setModelsState("loading");
+      }
+
+      if (background || hasExistingModels) {
+        setIsRefreshingModels(true);
+      }
+
       try {
-        const models = await fetchModels();
+        const { models, refreshedAt } = await fetchModels();
 
-        if (!isCurrent) {
-          return;
-        }
-
-        setModelOptions(models);
-        setModelsState("success");
-        setModelsError("");
+        startTransition(() => {
+          setModelOptions(models);
+          setModelsState("success");
+          setModelsError("");
+          setModelsLastRefreshedAt(refreshedAt);
+        });
       } catch (error) {
-        if (!isCurrent) {
-          return;
-        }
-
-        setModelOptions([]);
-        setModelsState("error");
-        setModelsError(
+        const message =
           error instanceof Error
             ? error.message
-            : "Unable to load models right now."
-        );
-      }
-    }
+            : "Unable to load models right now.";
 
+        startTransition(() => {
+          if (keepExistingOnError && hasExistingModels) {
+            setModelsState("success");
+            setModelsError(
+              `Refresh failed: ${message}. Showing the last loaded catalog.`
+            );
+            return;
+          }
+
+          setModelOptions([]);
+          setModelsState("error");
+          setModelsError(message);
+        });
+      } finally {
+        setIsRefreshingModels(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
     void loadModels();
+  }, [loadModels]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void loadModels({ keepExistingOnError: true, background: true });
+    }, MODEL_REFRESH_INTERVAL_MS);
 
     return () => {
-      isCurrent = false;
+      window.clearInterval(intervalId);
     };
-  }, []);
+  }, [loadModels]);
 
   useEffect(() => {
     if (!debouncedPrompt.trim()) {
@@ -219,6 +260,10 @@ export default function App() {
     resetAnalysis();
   }
 
+  function handleRefreshModels() {
+    void loadModels({ keepExistingOnError: true, background: true });
+  }
+
   function handleReasoningModeChange(nextValue) {
     setReasoningMode(nextValue);
     resetAnalysis();
@@ -253,6 +298,14 @@ export default function App() {
         name: model.name,
         input_price: model.input_price,
         output_price: model.output_price,
+        created: model.created,
+        canonical_slug: model.canonical_slug,
+        description: model.description,
+        supported_parameters: model.supported_parameters,
+        default_parameters: model.default_parameters,
+        pricing: model.pricing,
+        top_provider: model.top_provider,
+        expiration_date: model.expiration_date,
         context_length: model.context_length,
         input_modalities: model.input_modalities,
         output_modalities: model.output_modalities
@@ -369,6 +422,9 @@ export default function App() {
                     selectedModel={selectedModel}
                     onChange={handleSelectModel}
                     isLoading={modelsState === "loading"}
+                    isRefreshing={isRefreshingModels}
+                    lastRefreshedAt={modelsLastRefreshedAt}
+                    onRefresh={handleRefreshModels}
                     errorMessage={modelsError}
                     warningMessage={modelCompatibilityWarning}
                   />

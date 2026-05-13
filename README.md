@@ -2,7 +2,7 @@
 
 TokenOptimizer is a full-stack web application for estimating LLM usage cost before running a prompt. It helps builders understand prompt size, attachment token impact, output-token risk, reasoning-mode overhead, and cheaper model or prompt alternatives before spending credits.
 
-The app is built as a monorepo with a React frontend and an Express backend. The frontend counts prompt and attachment input tokens locally. The backend fetches the live OpenRouter model catalog and performs backend-native estimation with deterministic fallback, so the app remains usable even when optional OpenRouter estimator calls are unavailable.
+The app is built as a monorepo with a React frontend and an Express backend. The frontend counts prompt and attachment input tokens locally. The backend fetches the broad live OpenRouter model catalog with `output_modalities=all`, avoids stale catalog caching, and performs backend-native estimation with deterministic fallback, so the app remains usable even when optional OpenRouter estimator calls are unavailable.
 
 TokenOptimizer is an estimator and decision-support tool. It does not guarantee exact provider billing and does not run the selected model as part of the main estimate flow.
 
@@ -10,7 +10,7 @@ TokenOptimizer is an estimator and decision-support tool. It does not guarantee 
 
 - Counts prompt tokens locally with `tiktoken`.
 - Estimates attachment token impact locally without uploading file bytes.
-- Loads live OpenRouter model names, modality metadata, and pricing.
+- Loads a refreshable OpenRouter model catalog with names, modality metadata, richer pricing, provider limits, and timestamps.
 - Infers likely output type from the prompt instead of requiring a manual goal selector.
 - Accepts an optional free-text reasoning mode such as `Fast`, `Pro`, `Thinking`, `Adaptive Thinking`, or `budget_tokens=2048`.
 - Estimates visible output tokens, reasoning/thinking token overhead, total billable output tokens, and total cost.
@@ -44,7 +44,7 @@ Backend:
 
 External services:
 
-- OpenRouter public model catalog
+- OpenRouter public model catalog with broad output modality coverage
 - Optional OpenRouter estimator call from the backend
 
 ## Project Structure
@@ -77,7 +77,7 @@ The `n8n/` folder is retained as a legacy reference template. The main app no lo
 - Node.js 18 or newer
 - npm
 - Git
-- Optional: an OpenRouter API key if you want the backend to call an estimator model
+- Optional: an OpenRouter API key if you want authenticated catalog requests and backend estimator refinement
 
 Recommended local ports:
 
@@ -116,7 +116,7 @@ Variable notes:
 
 - `PORT`: backend port.
 - `CLIENT_ORIGIN`: comma-separated allowed frontend origins for CORS.
-- `OPENROUTER_API_KEY`: optional. When present, the backend can call OpenRouter for structured estimation.
+- `OPENROUTER_API_KEY`: optional. When present, the backend can call OpenRouter for structured estimation and authenticated model catalog requests.
 - `OPENROUTER_ESTIMATOR_MODEL`: optional estimator model. Defaults to `openrouter/free`.
 - `OPENROUTER_TIMEOUT_MS`: timeout for optional estimator calls.
 
@@ -185,7 +185,7 @@ Returns:
 
 ### `GET /api/models`
 
-Returns OpenRouter catalog data normalized for the frontend:
+Returns OpenRouter catalog data normalized for the frontend. The backend requests the broad OpenRouter catalog with `output_modalities=all` and responds with `Cache-Control: no-store` so browsers and proxies do not reuse stale catalog data.
 
 ```json
 {
@@ -193,15 +193,47 @@ Returns OpenRouter catalog data normalized for the frontend:
     {
       "id": "openai/gpt-4o-mini",
       "name": "OpenAI: GPT-4o-mini",
+      "canonical_slug": "openai/gpt-4o-mini",
+      "created": 1715367049,
+      "description": "A compact multimodal OpenAI model...",
       "input_price": 0.0015,
       "output_price": 0.002,
+      "pricing": {
+        "prompt": 0.0000015,
+        "completion": 0.000002,
+        "request": null,
+        "image": null,
+        "internal_reasoning": null,
+        "input_cache_read": null,
+        "input_cache_write": null
+      },
       "input_modalities": ["text"],
       "output_modalities": ["text"],
-      "context_length": 128000
+      "context_length": 128000,
+      "supported_parameters": ["temperature", "max_tokens"],
+      "default_parameters": null,
+      "top_provider": {
+        "context_length": 128000,
+        "max_completion_tokens": 16384,
+        "is_moderated": true
+      },
+      "expiration_date": null
     }
-  ]
+  ],
+  "refreshed_at": "2026-05-14T10:30:00.000Z"
 }
 ```
+
+## Model Catalog Freshness
+
+OpenRouter remains the source of truth for model availability, pricing, context limits, modalities, and provider metadata. TokenOptimizer does not use a local hardcoded model list.
+
+- The frontend loads the catalog on app start.
+- Users can click `Refresh` beside the model selector instead of reloading the page.
+- The frontend refreshes the catalog in the background every 10 minutes while the page is open.
+- The model selector shows `Last refreshed` so users know how fresh the catalog is.
+- If a refresh fails, the app keeps the last successful in-memory catalog and shows a warning instead of clearing the model list.
+- Newly launched models can appear only after OpenRouter exposes them through its API.
 
 ### `POST /api/analyze`
 
@@ -304,7 +336,7 @@ The recommended free-friendly deployment path is Render:
 
 - Render Static Site for the frontend.
 - Render Web Service for the backend.
-- OpenRouter key stored only in backend environment variables if estimator calls are enabled.
+- OpenRouter key stored only in backend environment variables if authenticated catalog requests or estimator calls are enabled.
 
 See [Render_deployment.md](./Render_deployment.md) for the full deployment guide.
 

@@ -2,9 +2,9 @@
 
 ## 1. Executive Summary
 
-TokenOptimizer is a full-stack web application that helps users estimate LLM usage cost before running a prompt. It shows prompt and file token impact, likely answer size, optional thinking-mode overhead, selected model pricing, and cheaper model or prompt alternatives.
+TokenOptimizer is a full-stack web application that helps users estimate LLM usage cost before running a prompt. It shows prompt and file token impact, likely answer size, optional thinking-mode overhead, selected model pricing, catalog freshness, and cheaper model or prompt alternatives.
 
-The current MVP is a React frontend and Express backend. It is no longer dependent on n8n. The backend performs native estimation, uses live OpenRouter model pricing, and falls back to deterministic logic when optional OpenRouter estimator calls are unavailable.
+The current MVP is a React frontend and Express backend. It is no longer dependent on n8n. The backend performs native estimation, uses a refreshable live OpenRouter model catalog, and falls back to deterministic logic when optional OpenRouter estimator calls are unavailable.
 
 ## 2. What Problem It Solves
 
@@ -28,6 +28,8 @@ TokenOptimizer makes those tradeoffs visible. It helps reduce surprise spend, im
 
 TokenOptimizer acts as a cost decision layer before execution. The user enters a prompt, optionally adds files, selects a model, and optionally types a reasoning mode such as `Fast`, `Standard`, `Pro`, `Adaptive Thinking`, or `budget_tokens=2048`.
 
+Because the model catalog is refreshed from OpenRouter rather than stored locally, users can search newly available models without restarting the app or waiting for a code update.
+
 The product then estimates:
 
 - Prompt and file tokens
@@ -44,7 +46,9 @@ The product is an estimator, not a billing guarantee. Its purpose is to help use
 
 The frontend counts prompt tokens locally with `tiktoken` and estimates attachment token impact without uploading file bytes. Text-like files are counted from local extraction, PDFs use local text extraction or page-count fallback, images use dimension-based estimates, and other files use a low-confidence size-based estimate.
 
-The backend validates the request, fetches live OpenRouter model pricing, infers the expected output type from the prompt, estimates likely answer size, applies reasoning-mode overhead, and calculates price. If an OpenRouter estimator key is configured, the backend can ask an estimator model for structured refinement. If that call fails or is not configured, deterministic backend estimation still works.
+The backend validates the request, fetches the broad OpenRouter model catalog with modality and pricing metadata, infers the expected output type from the prompt, estimates likely answer size, applies reasoning-mode overhead, and calculates price. If an OpenRouter estimator key is configured, the backend can ask an estimator model for structured refinement. If that call fails or is not configured, deterministic backend estimation still works.
+
+The frontend loads the model catalog on app start, lets users refresh it manually, refreshes it every 10 minutes in the background, and shows when the catalog was last refreshed. If a refresh fails, the last successful catalog stays visible.
 
 The dashboard shows the estimate in simple terms: prompt/file tokens, estimated output tokens, thinking mode cost, total output tokens, and estimated price. It also explains how the calculation was made.
 
@@ -54,13 +58,13 @@ The dashboard shows the estimate in simple terms: prompt/file tokens, estimated 
 | --- | --- |
 | Live Token Counting | Counts prompt tokens in real time so users understand input size before analysis. |
 | Local Attachment Estimation | Estimates token impact for text files, PDFs, images, media, and generic files locally; file bytes are not sent to the backend. |
-| Live Model Catalog | Loads searchable OpenRouter models with input/output pricing and modality metadata. |
+| Refreshable Model Catalog | Loads searchable OpenRouter models with input/output pricing, modality metadata, context limits, provider details, and a last-refreshed timestamp. |
 | Prompt-Based Output Inference | Infers Text, File, Image, Audio, or Video output from the prompt and attachment metadata. |
 | Optional Reasoning Mode | Lets users type modes such as Fast, Pro, Thinking, Adaptive Thinking, or explicit token budgets. Blank input defaults to Standard. |
 | Cost Estimate Dashboard | Shows prompt/file tokens, estimated output tokens, thinking-mode cost, total output tokens, estimated price, and calculation context. |
 | Model And Mode Recommendations | Compares lower-cost model and reasoning-mode alternatives with savings and confidence signals. |
 | Optimized Prompt Suggestions | Provides model-aware prompt rewrites to reduce repeated context and clarify output format. |
-| Secure Backend Estimator | Keeps OpenRouter credentials out of the frontend and uses deterministic fallback when estimator calls fail. |
+| Secure Backend Estimator | Keeps OpenRouter credentials out of the frontend and uses deterministic fallback when catalog or estimator calls fail. |
 | Legacy n8n Reference | Retains a sanitized n8n workflow template only as reference; the main app does not require n8n. |
 
 ## 7. Guardrails

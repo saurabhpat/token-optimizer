@@ -1,7 +1,7 @@
 # TokenOptimizer PRD
 
-Version: 1.0  
-Date: May 11, 2026  
+Version: 1.1  
+Date: May 14, 2026  
 Author / Role: Saurabh Patil - Product Builder  
 Status: MVP / In Progress  
 
@@ -37,7 +37,7 @@ TokenOptimizer helps users estimate LLM prompt cost before execution by showing 
 
 TokenOptimizer is a full-stack web application that helps people estimate LLM usage cost before running a prompt. The product is built for users who work with AI models frequently and want to understand the cost impact of their prompt, files, model choice, and optional reasoning mode before they spend credits.
 
-The current MVP is a web application with a React frontend and an Express backend. The frontend counts prompt tokens locally and estimates attachment token impact without uploading file contents. The backend pulls live model pricing from OpenRouter, infers the likely output type from the prompt, estimates expected output size, adds reasoning-mode overhead, calculates price, and recommends cheaper model or prompt alternatives.
+The current MVP is a web application with a React frontend and an Express backend. The frontend counts prompt tokens locally, estimates attachment token impact without uploading file contents, and keeps the model catalog fresh with manual and background refresh. The backend pulls the broad OpenRouter catalog with `output_modalities=all`, infers the likely output type from the prompt, estimates expected output size, adds reasoning-mode overhead, calculates price, and recommends cheaper model or prompt alternatives.
 
 The product solves a practical problem: most users do not know how expensive a prompt may become until after it is executed. This is especially painful when prompts are long, files are attached, expensive models are selected, or reasoning modes like Pro, Thinking, Adaptive Thinking, or custom token budgets are used.
 
@@ -189,7 +189,7 @@ Before spending model credits, the user should know:
 | --- | --- |
 | User writes prompt | Frontend counts prompt tokens locally with `tiktoken`. |
 | User adds files | Frontend estimates file token impact locally; file bytes do not go to backend. |
-| User selects model | Frontend loads live OpenRouter model catalog and pricing. |
+| User selects model | Frontend loads the live OpenRouter catalog, shows the last refresh time, and lets the user refresh without reloading the app. |
 | User enters reasoning mode | Backend interprets the text as Fast, Standard, Thinking, Pro, or custom budget. |
 | User clicks Estimate cost | Backend infers output type, estimates answer size, adds reasoning overhead, and calculates cost. |
 | User reviews result | Dashboard shows cost, tokens, recommendations, and optimized prompt suggestions. |
@@ -210,7 +210,7 @@ The current MVP is a deployable web application.
 | --- | --- |
 | Frontend | React, Vite, Tailwind CSS, lucide-react UI. |
 | Backend | Node.js and Express API. |
-| Model catalog | Fetches live OpenRouter model metadata and pricing. |
+| Model catalog | Fetches the broad OpenRouter catalog with `output_modalities=all`, richer metadata, no-store caching, manual refresh, and 10-minute background refresh. |
 | Prompt tokens | Counts prompt tokens locally in the browser. |
 | Attachments | Estimates token impact locally for text, PDF, image, audio, video, and generic files. |
 | File privacy | Sends only file metadata and token estimates to backend, not file bytes. |
@@ -294,7 +294,8 @@ The current backend has moved the core estimation logic into Express services. T
 | --- | --- | --- |
 | Prompt token counter | Counts prompt tokens locally after a short debounce. | Helps users understand input size before analysis. |
 | Attachment estimator | Estimates local file token impact from metadata, extracted text, dimensions, or file size. | Helps users understand cost impact of files without uploading them. |
-| Model search | Searches live OpenRouter catalog by model name or ID. | Helps users quickly select a model without scrolling through a long list. |
+| Model search | Searches the live OpenRouter catalog by model name or ID. | Helps users quickly select a model without scrolling through a long list. |
+| Catalog refresh | Refreshes the OpenRouter catalog on load, on demand, and every 10 minutes while preserving the last successful catalog if refresh fails. | Helps users see newly available models without restarting the app. |
 | Price chips | Shows input and output price per 1K tokens for the selected model. | Makes pricing visible at the moment of model selection. |
 | Reasoning mode textbox | Lets users type optional mode hints like Fast, Pro, Thinking, or token budgets. | Helps estimate hidden thinking-mode overhead. |
 | Backend prompt inference | Reads prompt language and infers output modality and artifact type. | Removes need for users to manually choose output goal. |
@@ -326,7 +327,7 @@ flowchart TD
     B --> F["Model selector"]
     F --> G["GET /api/models"]
     G --> H["Express backend"]
-    H --> I["OpenRouter model catalog"]
+    H --> I["OpenRouter model catalog with output_modalities=all"]
     B --> J["POST /api/analyze"]
     J --> K["Request validation"]
     K --> L["Prompt inference service"]
@@ -375,17 +376,18 @@ The backend is the trusted server-side layer. It receives the analysis payload a
 
 ### OpenRouter catalog layer
 
-The `/api/models` endpoint calls the public OpenRouter model catalog. It normalizes each model into a structure the frontend can use:
+The `/api/models` endpoint calls OpenRouter from the backend, not the frontend. It requests the broad catalog with `output_modalities=all`, includes the backend `OPENROUTER_API_KEY` as an Authorization header when configured, and returns `Cache-Control: no-store` so browser and proxy caches do not reuse stale catalog data.
 
-- `id`
-- `name`
-- `input_price`
-- `output_price`
-- `input_modalities`
-- `output_modalities`
-- `context_length`
+The normalized model payload includes:
 
-This allows users to search live model options and see current pricing without hardcoded model lists.
+- `id`, `name`, `canonical_slug`, `created`, and `description`
+- `input_price` and `output_price` as per-1K token values for the UI
+- raw pricing details such as request, image, cache, and internal-reasoning pricing where OpenRouter provides them
+- input/output modalities, supported/default parameters, context length, provider limits, and expiration date
+
+The frontend loads this catalog on app start, lets the user click `Refresh`, shows `Last refreshed`, and refreshes in the background every 10 minutes. If refresh fails, the app keeps the last successful catalog in memory and shows a warning instead of emptying the model selector.
+
+This allows users to search current model options and see newly available OpenRouter models as soon as the API exposes them, without relying on hardcoded local model lists.
 
 ### Prompt inference service
 
@@ -655,6 +657,7 @@ TokenOptimizer uses product, technical, and security guardrails.
 | Guardrail | Why it matters |
 | --- | --- |
 | API keys stay on backend | Prevents exposing OpenRouter keys in the browser. |
+| Catalog calls stay on backend | Allows authenticated OpenRouter catalog requests without exposing credentials. |
 | `.env` files are ignored by Git | Prevents secrets from being committed. |
 | Frontend does not need secrets | Keeps deployment safer and simpler. |
 | CORS is restricted by `CLIENT_ORIGIN` | Only approved frontend origins can call the backend. |
@@ -674,6 +677,7 @@ TokenOptimizer uses product, technical, and security guardrails.
 | Guardrail | Why it matters |
 | --- | --- |
 | OpenRouter estimator is optional | App still works without paid estimator calls. |
+| Catalog refresh is non-destructive | Failed refresh keeps the last successful model list visible. |
 | Deterministic fallback always exists | Product does not fail when estimator is unavailable. |
 | Estimator output is clamped | Prevents unrealistic output estimates. |
 | Estimates are labeled as estimates | Avoids presenting projections as exact billing. |
@@ -714,6 +718,9 @@ The golden dataset should include common and edge-case prompts.
 | Website/app | "Create an app plan for a project management dashboard." | Output type Text, artifact App, planning-sized estimate. |
 | High reasoning | "Evaluate tradeoffs across five architectures and recommend one." | Higher complexity, reasoning mode guidance. |
 | Large attachment | Prompt with a 5MB file metadata estimate. | Input tokens increase, file breakdown shown. |
+| Catalog search | Search `anth` in the model selector. | Anthropic models appear when present in OpenRouter response. |
+| Catalog refresh | Click `Refresh` beside model selector. | Last refreshed timestamp updates and selected model remains if still available. |
+| Catalog refresh failure | Simulate failed `/api/models` refresh after a successful load. | Existing model list remains visible and warning is shown. |
 | Explicit budget | Reasoning mode `budget_tokens=2048`. | Reasoning token estimate uses 2048. |
 | Fast mode | Reasoning mode `Fast`. | Lower thinking overhead. |
 | Pro mode | Reasoning mode `Pro`. | Higher thinking overhead. |
@@ -730,6 +737,7 @@ The golden dataset should include common and edge-case prompts.
 | API schema validation | Whether `/api/analyze` returns required fields. | Always returns stable success shape on valid input. |
 | Fallback reliability | Whether app works without OpenRouter estimator. | No valid request fails only because estimator is unavailable. |
 | Recommendation sanity | Whether cheaper recommendations are sorted by cost and context length. | Top recommendations are cheaper or clearly explained. |
+| Catalog metadata coverage | Whether `/api/models` includes modalities, pricing, provider limits, and freshness timestamp. | Response includes broad model metadata and `refreshed_at`. |
 
 ### Online evals
 
@@ -739,6 +747,7 @@ Online evals measure real usage behavior.
 | --- | --- | --- |
 | Estimate completion rate | Users who complete an estimate after opening Optimizer. | Shows whether the workflow is usable. |
 | Model catalog success rate | Successful `/api/models` loads. | Shows reliability of external catalog dependency. |
+| Catalog refresh success rate | Manual and background refreshes that complete without clearing the current catalog. | Shows whether the model list stays fresh and reliable. |
 | Error rate | Failed analyze requests divided by total requests. | Tracks product health. |
 | Optimized prompt copy rate | Users who copy or use optimized prompts. | Shows whether recommendations are useful. |
 | Repeat usage | Users who return and estimate again. | Shows product stickiness. |
@@ -773,7 +782,7 @@ Reviewers should check:
 | First estimate completion | Users who run at least one estimate after landing. | 50%+ of users who open Optimizer. |
 | Recommendation engagement | Users who view or copy optimized prompt/recommendation. | 25%+ of completed estimates. |
 | Repeat usage | Users who return within 7 days. | 20%+ after first launch cohort. |
-| Model catalog load success | Successful model catalog loads. | 95%+ in production. |
+| Model catalog load and refresh success | Successful initial catalog loads and manual/background refreshes. | 95%+ in production. |
 
 ### Secondary metrics
 
@@ -783,6 +792,7 @@ Reviewers should check:
 | Reasoning mode usage | Percentage of users entering optional reasoning mode. | Learn baseline behavior first. |
 | Attachment usage | Percentage of estimates with files. | Understand file-heavy use cases. |
 | Prompt optimization usage | Copies or uses of optimized prompt. | Track usefulness. |
+| Catalog freshness usage | Percentage of sessions where users click manual refresh. | Understand whether users expect newly dropped models. |
 
 ### Guardrail metrics
 
@@ -790,6 +800,7 @@ Reviewers should check:
 | --- | ---: | ---: | ---: |
 | Analyze API error rate | Under 5% | 5% to 12% | Over 12% |
 | Model catalog timeout rate | Under 5% | 5% to 10% | Over 10% |
+| Catalog refresh failure rate | Under 5% | 5% to 10% | Over 10% |
 | OpenRouter estimator fallback rate | Under 40% | 40% to 70% | Over 70% |
 | User confusion on calculation | Under 20% negative feedback | 20% to 40% | Over 40% |
 
@@ -800,7 +811,8 @@ Reviewers should check:
 | Risk | Impact | Likelihood | Mitigation |
 | --- | --- | --- | --- |
 | Estimates do not match actual provider billing | Users may lose trust. | Medium | Clearly label as estimate; add exact measurement later as optional feature. |
-| OpenRouter catalog changes | Model list or pricing may fail to load. | Medium | Normalize catalog response; show clear error; retry or cache later. |
+| OpenRouter catalog changes | Model list, pricing, or metadata shape may change. | Medium | Normalize catalog response, preserve richer metadata, use no-store responses, and keep the last successful catalog on refresh failure. |
+| Newly launched models have upstream delay | Users may not see a model until OpenRouter publishes it through the API. | Medium | Explain that OpenRouter is the source of truth and provide manual refresh plus background refresh. |
 | Reasoning modes differ by provider | Mode estimates may be approximate. | High | Treat user-entered mode as estimation metadata, not guaranteed provider config. |
 | Users do not want to leave their AI tool | Web app may feel like extra work. | High | Consider Chrome extension after validating web MVP. |
 | Free model recommendations seem low-quality | Users may distrust suggestions. | Medium | Show confidence and mode rationale, not just cheapest cost. |
@@ -992,6 +1004,12 @@ Response:
 GET /api/models
 ```
 
+Response headers:
+
+```http
+Cache-Control: no-store
+```
+
 Response:
 
 ```json
@@ -1000,13 +1018,34 @@ Response:
     {
       "id": "openai/gpt-4o-mini",
       "name": "OpenAI: GPT-4o-mini",
+      "canonical_slug": "openai/gpt-4o-mini",
+      "created": 1715367049,
+      "description": "A compact multimodal OpenAI model...",
       "input_price": 0.0015,
       "output_price": 0.002,
+      "pricing": {
+        "prompt": 0.0000015,
+        "completion": 0.000002,
+        "request": null,
+        "image": null,
+        "internal_reasoning": null,
+        "input_cache_read": null,
+        "input_cache_write": null
+      },
       "input_modalities": ["text"],
       "output_modalities": ["text"],
-      "context_length": 128000
+      "context_length": 128000,
+      "supported_parameters": ["temperature", "max_tokens"],
+      "default_parameters": null,
+      "top_provider": {
+        "context_length": 128000,
+        "max_completion_tokens": 16384,
+        "is_moderated": true
+      },
+      "expiration_date": null
     }
-  ]
+  ],
+  "refreshed_at": "2026-05-14T10:30:00.000Z"
 }
 ```
 
