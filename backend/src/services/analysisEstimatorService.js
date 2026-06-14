@@ -105,6 +105,214 @@ function normalizeConfidence(value, fallbackValue) {
   return Math.min(Math.max(numericValue, 0.35), 0.92);
 }
 
+const PREDICTION_CONFIDENCE_FORMULA = [
+  "Use OpenRouter estimator confidence when it returns a valid value.",
+  "Normalize percent values such as 84 into 0.84, and keep decimal values such as 0.84 as-is.",
+  "Use 0.78 as the fallback when OpenRouter assisted the estimate, or 0.68 when the deterministic backend estimate was used.",
+  "Clamp the final score between 0.35 and 0.92 because this is a directional estimate, not measured accuracy."
+];
+
+function getPredictionConfidenceBasis(estimatorData, predictionConfidence) {
+  const usedOpenRouterEstimator = Boolean(estimatorData);
+
+  return [
+    usedOpenRouterEstimator
+      ? "OpenRouter returned a structured estimator response; the backend normalized and clamped its confidence value."
+      : "OpenRouter estimator confidence was unavailable; the backend used deterministic heuristic confidence.",
+    usedOpenRouterEstimator
+      ? "OpenRouter-assisted fallback baseline is 0.78 before clamping."
+      : "Deterministic backend fallback baseline is 0.68 before clamping.",
+    `Displayed estimate confidence is ${Math.round(predictionConfidence * 100)}%.`
+  ];
+}
+
+function getReasoningRequestConfig(reasoningMode) {
+  const modeText = `${reasoningMode?.reasoning_mode_label ?? ""} ${reasoningMode?.reasoning_mode_input ?? ""}`.toLowerCase();
+  const explicitBudgetMatch = modeText.match(/(?:budget_tokens|thinking budget|reasoning budget)?\s*[=:]?\s*(\d{3,6})\s*(?:tokens?)?/);
+
+  if (explicitBudgetMatch) {
+    return {
+      max_tokens: Number(explicitBudgetMatch[1])
+    };
+  }
+
+  if (
+    modeText.includes("pro") ||
+    modeText.includes("deep") ||
+    modeText.includes("high") ||
+    modeText.includes("xhigh")
+  ) {
+    return {
+      effort: "high"
+    };
+  }
+
+  if (
+    modeText.includes("thinking") ||
+    modeText.includes("reason") ||
+    modeText.includes("adaptive")
+  ) {
+    return {
+      effort: "medium"
+    };
+  }
+
+  if (
+    modeText.includes("fast") ||
+    modeText.includes("low") ||
+    modeText.includes("minimal") ||
+    modeText.includes("flash")
+  ) {
+    return {
+      effort: "low"
+    };
+  }
+
+  return null;
+}
+
+function buildBaselineMessages(payload) {
+  return [
+    {
+      role: "system",
+      content:
+        "Answer the user's request directly. Keep the response useful, structured, and concise unless the user explicitly asks for a long-form artifact."
+    },
+    {
+      role: "user",
+      content: payload.prompt
+    }
+  ];
+}
+
+async function callOpenRouterBaseline(payload, promptProfile, reasoningMode) {
+  if (!env.openRouterBaselineMeasurementEnabled) {
+    return {
+      data: null,
+      note: "Selected-model baseline run is disabled; backend estimate used as baseline."
+    };
+  }
+
+  if (!env.openRouterApiKey) {
+    return {
+      data: null,
+      note: "OpenRouter key is not configured; backend estimate used as baseline."
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), env.openRouterTimeoutMs);
+  const reasoningConfig = getReasoningRequestConfig(reasoningMode);
+
+  try {
+    const requestBody = {
+      model: payload.model,
+      temperature: 0.2,
+      max_tokens: Math.min(
+        Math.max(Math.ceil(promptProfile.visible_output_tokens), 256),
+        1600
+      ),
+      messages: buildBaselineMessages(payload)
+    };
+
+    if (reasoningConfig) {
+      requestBody.reasoning = reasoningConfig;
+    }
+
+    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.openRouterApiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    });
+
+    let responseData = {};
+
+    try {
+      responseData = await response.json();
+    } catch {
+      return {
+        data: null,
+        note: "Selected-model baseline returned invalid JSON; backend estimate used as baseline."
+      };
+    }
+
+    if (!response.ok) {
+      const upstreamMessage =
+        responseData?.error?.message ||
+        responseData?.message ||
+        "Selected-model baseline request failed.";
+
+      return {
+        data: null,
+        note: `${upstreamMessage} Backend estimate used as baseline.`
+      };
+    }
+
+    const usage = responseData?.usage ?? {};
+    const completionTokens = toFiniteNumber(usage.completion_tokens);
+    const reasoningTokens = toFiniteNumber(
+      usage.reasoning_tokens ??
+        usage.completion_tokens_details?.reasoning_tokens ??
+        usage.output_tokens_details?.reasoning_tokens
+    );
+    const visibleTokens =
+      reasoningTokens > 0 && completionTokens > reasoningTokens
+        ? completionTokens - reasoningTokens
+        : completionTokens;
+    const totalOutputTokens =
+      completionTokens > 0
+        ? completionTokens
+        : visibleTokens + reasoningTokens;
+    const actualCost = toFiniteNumber(usage.cost, NaN);
+
+    if (completionTokens <= 0 && !Number.isFinite(actualCost)) {
+      return {
+        data: null,
+        note: "Selected-model baseline did not include usage metadata; backend estimate used as baseline."
+      };
+    }
+
+    return {
+      data: {
+        baseline_model: payload.model,
+        baseline_reasoning_mode: reasoningMode.reasoning_mode_label,
+        output_type: promptProfile.output_type,
+        artifact_type: promptProfile.artifact_type,
+        input_tokens: toFiniteNumber(usage.prompt_tokens, toFiniteNumber(payload.input_tokens)),
+        attachment_tokens: toFiniteNumber(payload.attachment_tokens),
+        visible_output_tokens: visibleTokens,
+        reasoning_tokens: reasoningTokens,
+        total_output_tokens: totalOutputTokens || completionTokens,
+        actual_or_estimated_cost: Number.isFinite(actualCost) ? roundCurrency(actualCost) : null,
+        latency_ms: null,
+        finish_reason: responseData?.choices?.[0]?.finish_reason ?? "",
+        generation_id: responseData?.id ?? "",
+        measurement_source: "openrouter_response"
+      },
+      note: "Selected-model baseline run used OpenRouter response usage metadata."
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return {
+        data: null,
+        note: "Selected-model baseline timed out; backend estimate used as baseline."
+      };
+    }
+
+    return {
+      data: null,
+      note: "Selected-model baseline was unavailable; backend estimate used as baseline."
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function buildEstimatorMessages(payload, promptProfile, reasoningMode) {
   const attachmentSummary = Array.isArray(payload.input_attachments)
     ? payload.input_attachments.map((attachment) => ({
@@ -279,20 +487,45 @@ export async function analyzeWithBackendEstimator(payload) {
     initialReasoningMode
   );
   const estimatorData = estimatorResult.data;
-  const visibleOutputTokens = clampEstimatorVisibleTokens(
+  let visibleOutputTokens = clampEstimatorVisibleTokens(
     estimatorData?.visible_output_tokens ?? estimatorData?.predicted_output,
     promptProfile.visible_output_tokens,
     promptProfile.output_type
   );
-  const reasoningMode = parseReasoningMode(
+  let reasoningMode = parseReasoningMode(
     payload.reasoning_mode,
     promptProfile,
     visibleOutputTokens
   );
-  const predictedOutput = visibleOutputTokens + reasoningMode.reasoning_token_estimate;
-  const estimatedCost = ["Image", "Audio", "Video"].includes(promptProfile.output_type)
+  let predictedOutput = visibleOutputTokens + reasoningMode.reasoning_token_estimate;
+  let estimatedCost = ["Image", "Audio", "Video"].includes(promptProfile.output_type)
     ? getMediaCost(payload, promptProfile.output_type)
     : getTextCost(payload, predictedOutput);
+  const baselineResult = await callOpenRouterBaseline(
+    payload,
+    {
+      ...promptProfile,
+      visible_output_tokens: visibleOutputTokens
+    },
+    reasoningMode
+  );
+
+  if (baselineResult.data && !["Image", "Audio", "Video"].includes(promptProfile.output_type)) {
+    visibleOutputTokens =
+      baselineResult.data.visible_output_tokens || visibleOutputTokens;
+    reasoningMode = {
+      ...reasoningMode,
+      reasoning_token_estimate:
+        baselineResult.data.reasoning_tokens ??
+        reasoningMode.reasoning_token_estimate
+    };
+    predictedOutput =
+      baselineResult.data.total_output_tokens ||
+      visibleOutputTokens + reasoningMode.reasoning_token_estimate;
+    estimatedCost = Number.isFinite(Number(baselineResult.data.actual_or_estimated_cost))
+      ? roundCurrency(baselineResult.data.actual_or_estimated_cost)
+      : getTextCost(payload, predictedOutput);
+  }
   const predictionConfidence = normalizeConfidence(
     estimatorData?.prediction_confidence,
     estimatorData ? 0.78 : 0.68
@@ -338,14 +571,36 @@ export async function analyzeWithBackendEstimator(payload) {
       ? "backend_openrouter_estimator"
       : "backend_deterministic_estimator",
     prediction_confidence: predictionConfidence,
+    prediction_confidence_basis: getPredictionConfidenceBasis(
+      estimatorData,
+      predictionConfidence
+    ),
+    confidence_formula: PREDICTION_CONFIDENCE_FORMULA,
     prediction_notes: [
       ...promptProfile.inference_notes,
       reasoningMode.reasoning_mode_rationale,
       reasoningMode.mode_selection_criteria,
       estimatorResult.note,
+      baselineResult.note,
       typeof estimatorData?.prediction_notes === "string"
         ? estimatorData.prediction_notes.trim()
         : ""
-    ].filter(Boolean)
+    ].filter(Boolean),
+    baseline_usage: baselineResult.data ?? {
+      baseline_model: payload.model,
+      baseline_reasoning_mode: reasoningMode.reasoning_mode_label,
+      output_type: promptProfile.output_type,
+      artifact_type: promptProfile.artifact_type,
+      input_tokens: toFiniteNumber(payload.input_tokens),
+      prompt_tokens: toFiniteNumber(payload.prompt_tokens),
+      attachment_tokens: toFiniteNumber(payload.attachment_tokens),
+      visible_output_tokens: visibleOutputTokens,
+      reasoning_tokens: reasoningMode.reasoning_token_estimate,
+      total_output_tokens: predictedOutput,
+      actual_or_estimated_cost: estimatedCost,
+      measurement_source: estimatorData
+        ? "backend_openrouter_estimator"
+        : "backend_deterministic_estimator"
+    }
   };
 }

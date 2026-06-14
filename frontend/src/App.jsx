@@ -13,6 +13,7 @@ import InputAttachments from "./components/InputAttachments";
 import ModelSelector from "./components/ModelSelector";
 import PromptInput from "./components/PromptInput";
 import ReasoningModeInput from "./components/ReasoningModeInput";
+import SweepView from "./components/SweepView";
 import TopNav from "./components/TopNav";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { analyzePrompt, fetchModels } from "./lib/api";
@@ -20,11 +21,17 @@ import { estimateAttachment } from "./lib/attachmentEstimator";
 import { countTokens } from "./lib/tokenCounter";
 
 const MODEL_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+const SWEEP_STORAGE_KEY = "tokenoptimizer-sweep-payload";
+
 
 export default function App() {
-  const [activeView, setActiveView] = useState(() =>
-    window.location.hash === "#optimizer" ? "optimizer" : "about"
-  );
+  const [activeView, setActiveView] = useState(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (hash === "sweep") return "sweep";
+    if (hash === "optimizer") return "optimizer";
+    return "about";
+  });
+
   const [prompt, setPrompt] = useState("");
   const [modelOptions, setModelOptions] = useState([]);
   const [modelsState, setModelsState] = useState("loading");
@@ -34,6 +41,7 @@ export default function App() {
   const [selectedModelId, setSelectedModelId] = useState("");
   const [reasoningMode, setReasoningMode] = useState("");
   const [promptTokens, setPromptTokens] = useState(0);
+
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [isEstimatingAttachments, setIsEstimatingAttachments] = useState(false);
@@ -41,6 +49,7 @@ export default function App() {
   const [analysisState, setAnalysisState] = useState("idle");
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analysisErrorMessage, setAnalysisErrorMessage] = useState("");
+  const [activeAction, setActiveAction] = useState("");
   const modelOptionsRef = useRef([]);
 
   const deferredPrompt = useDeferredValue(prompt);
@@ -56,13 +65,21 @@ export default function App() {
     (attachment) => attachment.type === "image"
   );
 
+
   useEffect(() => {
     modelOptionsRef.current = modelOptions;
   }, [modelOptions]);
 
   useEffect(() => {
     function handleHashChange() {
-      setActiveView(window.location.hash === "#optimizer" ? "optimizer" : "about");
+      const hash = window.location.hash.replace("#", "");
+      if (hash === "sweep") {
+        setActiveView("sweep");
+      } else if (hash === "optimizer") {
+        setActiveView("optimizer");
+      } else {
+        setActiveView("about");
+      }
     }
 
     window.addEventListener("hashchange", handleHashChange);
@@ -72,9 +89,22 @@ export default function App() {
     };
   }, []);
 
+
   function handleChangeView(view) {
     setActiveView(view);
-    window.location.hash = view === "about" ? "about" : "optimizer";
+    if (view === "about") {
+      window.location.hash = "about";
+    } else if (view === "sweep") {
+      window.location.hash = "sweep";
+    } else {
+      window.location.hash = "optimizer";
+    }
+  }
+
+
+  function handleOpenRankingGuide() {
+    setActiveView("about");
+    window.location.hash = "ranking-guide";
   }
 
   function resetAnalysis() {
@@ -82,6 +112,7 @@ export default function App() {
       setAnalysisState("idle");
       setAnalysisResult(null);
       setAnalysisErrorMessage("");
+      setActiveAction("");
     });
   }
 
@@ -197,6 +228,7 @@ export default function App() {
         setAnalysisState("idle");
         setAnalysisResult(null);
         setAnalysisErrorMessage("");
+        setActiveAction("");
       });
     }
   }, [prompt]);
@@ -319,6 +351,7 @@ export default function App() {
     }
 
     setAnalysisState("loading");
+    setActiveAction("estimate");
     setAnalysisErrorMessage("");
 
     try {
@@ -327,11 +360,13 @@ export default function App() {
       startTransition(() => {
         setAnalysisResult(data);
         setAnalysisState("success");
+        setActiveAction("");
       });
     } catch (error) {
       startTransition(() => {
         setAnalysisResult(null);
         setAnalysisState("error");
+        setActiveAction("estimate");
         setAnalysisErrorMessage(
           error instanceof Error
             ? error.message
@@ -340,6 +375,23 @@ export default function App() {
       });
     }
   }
+
+  async function handleQualitySweep() {
+    if (!prompt.trim() || !selectedModel) {
+      return;
+    }
+
+    const payload = buildRequestPayload();
+
+    try {
+      localStorage.setItem(SWEEP_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage may be unavailable; proceed anyway.
+    }
+
+    window.open("/#sweep", "_blank", "noopener,noreferrer");
+  }
+
 
   function handleUseRecommendation(recommendation) {
     if (typeof recommendation?.optimized_prompt === "string") {
@@ -361,23 +413,28 @@ export default function App() {
       setAnalysisState("idle");
       setAnalysisResult(null);
       setAnalysisErrorMessage("");
+      setActiveAction("");
     });
   }
 
   const isBusy = analysisState === "loading";
   const modelCompatibilityWarning = getModelCompatibilityWarning();
-  const isActionDisabled =
+  const isEstimateDisabled =
     !prompt.trim() ||
     !selectedModel ||
     isBusy ||
     isEstimatingAttachments ||
     modelsState !== "success";
+  const isSweepDisabled = isEstimateDisabled;
 
   return (
     <div className="min-h-screen bg-shell-glow">
       <TopNav activeView={activeView} onChangeView={handleChangeView} />
 
-      {activeView === "about" ? (
+
+      {activeView === "sweep" ? (
+        <SweepView />
+      ) : activeView === "about" ? (
         <AboutView onOpenOptimizer={() => handleChangeView("optimizer")} />
       ) : (
         <main className="mx-auto max-w-[1480px] px-3 py-4 sm:px-5 lg:px-6 xl:px-8">
@@ -434,15 +491,27 @@ export default function App() {
                   />
                 </div>
 
-                <div className="pt-1">
+                <div className="grid gap-2 pt-1 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                   <AnalyzeButton
-                    disabled={isActionDisabled}
-                    isLoading={analysisState === "loading"}
+                    disabled={isEstimateDisabled}
+                    isLoading={analysisState === "loading" && activeAction === "estimate"}
                     onClick={handleAnalyze}
                     label="Estimate cost"
                     loadingLabel="Estimating..."
                   />
+                  <AnalyzeButton
+                    disabled={isSweepDisabled}
+                    isLoading={false}
+                    onClick={handleQualitySweep}
+                    label="Run quality sweep"
+                    loadingLabel="Opening sweep..."
+                    variant="secondary"
+                  />
                 </div>
+                <p className="text-xs leading-5 text-slate-500">
+                  Quality Sweep opens in a new window where you can enter your
+                  OpenRouter key and run a measured comparison.
+                </p>
               </div>
             </section>
 
@@ -458,6 +527,8 @@ export default function App() {
               errorMessage={analysisErrorMessage}
               selectedModel={selectedModel}
               onUseRecommendation={handleUseRecommendation}
+              onOpenRankingGuide={handleOpenRankingGuide}
+              activeAction={activeAction}
             />
           </div>
         </main>

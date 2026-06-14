@@ -5,7 +5,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
-  Gauge,
+  Layers,
   Loader2,
   Sparkles,
   WalletCards
@@ -40,12 +40,28 @@ function LoadingState() {
   );
 }
 
-function ErrorState({ message }) {
+function SweepLoadingState() {
+  return (
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-border bg-white px-5 py-8 text-center">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <h2 className="mt-4 text-lg font-semibold">Running quality sweep</h2>
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+        Running the selected baseline and shortlisted alternatives through
+        OpenRouter, then judging quality retention against the baseline.
+      </p>
+    </div>
+  );
+}
+
+function ErrorState({ message, activeAction }) {
+  const title =
+    activeAction === "sweep" ? "Quality Sweep failed" : "Estimate failed";
+
   return (
     <div className="min-h-[220px] rounded-lg border border-rose-200 bg-rose-50 px-5 py-8">
       <div className="flex items-center gap-3 text-rose-700">
         <AlertCircle className="h-6 w-6" />
-        <h2 className="text-lg font-semibold">Estimate failed</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
       </div>
       <p className="mt-4 text-sm leading-6 text-rose-700">{message}</p>
     </div>
@@ -69,6 +85,26 @@ function formatNullableNumber(value) {
 
 function formatNullablePrice(value) {
   return Number.isFinite(Number(value)) ? formatPrice(Number(value)) : "--";
+}
+
+function formatPercent(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return "--";
+  }
+
+  return `${Math.round(numericValue <= 1 ? numericValue * 100 : numericValue)}%`;
+}
+
+function formatWholePercent(value) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return "--";
+  }
+
+  return `${Math.round(numericValue)}%`;
 }
 
 function AttachmentSummary({ inputBreakdown }) {
@@ -197,11 +233,74 @@ function EstimateTab({ result, selectedModel, inputBreakdown }) {
   );
 }
 
+function pillColorClasses(color) {
+  if (color === "green") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+
+  if (color === "yellow") {
+    return "border-amber-200 bg-amber-50 text-amber-800";
+  }
+
+  return "border-rose-200 bg-rose-50 text-rose-800";
+}
+
+/**
+ * A pill that leads with the score % (large + bold) and uses the label
+ * as smaller supporting text below it. This makes the number scannable
+ * at a glance without needing to parse word-labels first.
+ */
+function FactorPill({ label, score, color }) {
+  const displayScore = Number.isFinite(Number(score)) ? Math.round(Number(score)) : null;
+
+  return (
+    <span
+      className={[
+        "inline-flex flex-col items-center rounded-xl border px-3 py-1.5 min-w-[72px]",
+        pillColorClasses(color)
+      ].join(" ")}
+    >
+      <span className="text-sm font-bold leading-tight">
+        {displayScore !== null ? `${displayScore}%` : "—"}
+      </span>
+      <span className="mt-0.5 text-[10px] font-medium leading-none opacity-80">
+        {label}
+      </span>
+    </span>
+  );
+}
+
+function ConfidenceBar({ score, label }) {
+  const width = Math.round(Math.min(Math.max(Number(score) || 0, 0), 100));
+  const barColor =
+    width >= 72
+      ? "bg-emerald-500"
+      : width >= 58
+        ? "bg-amber-400"
+        : "bg-rose-400";
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-slate-500">{label ?? ""}</span>
+        <span className="text-sm font-bold text-ink">{width}%</span>
+      </div>
+      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={["h-full rounded-full transition-all duration-500", barColor].join(" ")}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function RecommendationsTab({
   recommendations,
   selectedRecommendationId,
   onSelectRecommendation,
-  onOpenPrompt
+  onOpenPrompt,
+  onOpenRankingGuide
 }) {
   if (recommendations.length === 0) {
     return (
@@ -216,6 +315,67 @@ function RecommendationsTab({
       {recommendations.map((recommendation, index) => {
         const isSelected = recommendation.model_id === selectedRecommendationId;
 
+        // Prefer the new simplified fields, fall back to legacy.
+        const blendedScore =
+          Number.isFinite(Number(recommendation.simplified_confidence_score))
+            ? Number(recommendation.simplified_confidence_score)
+            : Number.isFinite(Number(recommendation.confidence_percent))
+              ? Number(recommendation.confidence_percent)
+              : 0;
+        const blendedLabel =
+          recommendation.simplified_confidence_label ??
+          recommendation.confidence_label ??
+          "";
+
+        // Fallback calculations for the 3 factors in case they are missing from backend/cached response
+        const breakdown = recommendation.confidence_breakdown || [];
+        const capabilityFactor = breakdown.find((f) => f.key === "capability_match" || f.factor === "Capability Match");
+        const taskFactor = breakdown.find((f) => f.key === "task_output_fit" || f.factor === "Task/Output Fit");
+        const reasoningFactor = breakdown.find((f) => f.key === "reasoning_mode_equivalence" || f.factor === "Reasoning Mode Equivalence");
+        const contextFactor = breakdown.find((f) => f.key === "context_attachment_safety" || f.factor === "Context Attachment Safety");
+        const reliabilityFactor = breakdown.find((f) => f.key === "reliability_metadata" || f.factor === "Reliability/Metadata");
+
+        const qualityRawEarned =
+          (capabilityFactor?.earned ?? 0) +
+          (taskFactor?.earned ?? 0) +
+          (reasoningFactor?.earned ?? 0);
+        const derivedQualityScore = Math.min(Math.max(Math.round((qualityRawEarned / 70) * 100), 0), 100);
+
+        const contextRawEarned =
+          (contextFactor?.earned ?? 0) +
+          (reliabilityFactor?.earned ?? 0);
+        const derivedContextScore = Math.min(Math.max(Math.round((contextRawEarned / 25) * 100), 0), 100);
+
+        const derivedCostScore = Math.min(Math.max(Math.round(recommendation.savings_percent ?? 0), 0), 100);
+
+        const getPillColor = (score) => {
+          if (score >= 70) return "green";
+          if (score >= 45) return "yellow";
+          return "red";
+        };
+
+        const getPillLabel = (score, highLabel, midLabel, lowLabel) => {
+          if (score >= 70) return highLabel;
+          if (score >= 45) return midLabel;
+          return lowLabel;
+        };
+
+        const qualityScore = recommendation.quality_match_score ?? derivedQualityScore;
+        const qualityLabel = recommendation.quality_match_label ?? getPillLabel(qualityScore, "Strong", "Moderate", "Weak");
+        const qualityColor = recommendation.quality_match_color ?? getPillColor(qualityScore);
+
+        const costScore = recommendation.cost_efficiency_score ?? derivedCostScore;
+        const costLabel = recommendation.cost_efficiency_label ?? getPillLabel(costScore, "High savings", "Moderate savings", "Low savings");
+        const costColor = recommendation.cost_efficiency_color ?? getPillColor(costScore);
+
+        const contextScore = recommendation.context_safety_score ?? derivedContextScore;
+        const contextLabel = recommendation.context_safety_label ?? getPillLabel(contextScore, "Safe", "Marginal", "Risky");
+        const contextColor = recommendation.context_safety_color ?? getPillColor(contextScore);
+
+        const rankReasons = Array.isArray(recommendation.rank_reason_summary)
+          ? recommendation.rank_reason_summary
+          : [];
+
         return (
           <button
             key={recommendation.model_id}
@@ -228,6 +388,7 @@ function RecommendationsTab({
                 : "border-border bg-white hover:border-blue-200 hover:bg-soft"
             ].join(" ")}
           >
+            {/* Header row: rank + name + cost + savings badges */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -242,7 +403,6 @@ function RecommendationsTab({
                   {recommendation.model_id}
                 </p>
               </div>
-
               <div className="flex shrink-0 flex-wrap gap-2 text-xs">
                 <span className="inline-flex items-center gap-1 rounded-full border border-border bg-white px-2 py-1 font-medium text-slate-600">
                   <WalletCards className="h-3.5 w-3.5 text-primary" />
@@ -251,40 +411,59 @@ function RecommendationsTab({
                 <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50 px-2 py-1 font-medium text-emerald-700">
                   Save {recommendation.savings_percent}%
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-white px-2 py-1 font-medium text-primary">
-                  <Gauge className="h-3.5 w-3.5" />
-                  {Math.round(recommendation.confidence_score * 100)}%
-                </span>
               </div>
             </div>
 
-            <div className="mt-2 grid gap-2 text-xs text-slate-600 lg:grid-cols-[0.85fr_0.85fr_1.3fr]">
-              <div>
-                <p className="font-semibold text-slate-500">Mode</p>
-                <p className="mt-1 leading-5">{recommendation.mode}</p>
-                {recommendation.recommended_reasoning_mode ? (
-                  <p className="mt-1 leading-5 text-slate-500">
-                    Cheaper mode: {recommendation.recommended_reasoning_mode}
-                  </p>
-                ) : null}
-              </div>
-              <div>
-                <p className="font-semibold text-slate-500">Accuracy</p>
-                <p className="mt-1 leading-5">{recommendation.accuracy}</p>
-                {recommendation.confidence_basis ? (
-                  <p className="mt-1 leading-5 text-slate-500">
-                    {recommendation.confidence_basis}
-                  </p>
-                ) : null}
-              </div>
-              <div>
-                <p className="font-semibold text-slate-500">Prompt strategy</p>
-                <p className="mt-1 max-h-10 overflow-hidden leading-5">
-                  {recommendation.prompt_strategy ??
-                    recommendation.prompt_change}
-                </p>
-              </div>
+            {/* Blended confidence bar */}
+            <div className="mt-3">
+              <ConfidenceBar score={blendedScore} label={blendedLabel} />
             </div>
+
+            {/* 3-factor pills — score is the primary visual, label is supporting */}
+            <div className="mt-3 flex gap-3">
+              <FactorPill
+                label="Output Quality"
+                score={qualityScore}
+                color={qualityColor}
+              />
+              <FactorPill
+                label="Cost Efficiency"
+                score={costScore}
+                color={costColor}
+              />
+              <FactorPill
+                label="Context Safety"
+                score={contextScore}
+                color={contextColor}
+              />
+            </div>
+
+            {/* Expandable reasoning */}
+            {isSelected && rankReasons.length > 0 ? (
+              <div className="mt-3 rounded-md border border-blue-100 bg-white p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Why this model?
+                  </p>
+                  <span
+                    className="text-xs font-semibold text-primary"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenRankingGuide?.();
+                    }}
+                  >
+                    How confidence works
+                  </span>
+                </div>
+                <ul className="mt-2 grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-3">
+                  {rankReasons.map((reason) => (
+                    <li key={reason} className="rounded bg-soft px-2 py-1">
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             <div className="mt-2 flex justify-end">
               <span
@@ -304,6 +483,7 @@ function RecommendationsTab({
     </div>
   );
 }
+
 
 function PromptTab({ recommendation, onUseRecommendation }) {
   const [copiedPromptId, setCopiedPromptId] = useState("");
@@ -326,6 +506,18 @@ function PromptTab({ recommendation, onUseRecommendation }) {
     );
   }
 
+  const optimizedPromptTokens = Number.isFinite(
+    Number(recommendation.optimized_prompt_tokens)
+  )
+    ? Number(recommendation.optimized_prompt_tokens)
+    : Number(recommendation.optimized_input_tokens);
+  const optimizedAttachmentTokens = Number.isFinite(
+    Number(recommendation.optimized_attachment_tokens)
+  )
+    ? Number(recommendation.optimized_attachment_tokens)
+    : 0;
+  const hasAttachmentTokens = optimizedAttachmentTokens > 0;
+
   return (
     <div className="rounded-lg border border-border bg-white p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -339,11 +531,20 @@ function PromptTab({ recommendation, onUseRecommendation }) {
         </div>
         <div className="flex flex-wrap gap-2 text-xs text-slate-600">
           <span className="rounded-full border border-border bg-soft px-2 py-1">
-            {formatNumber(recommendation.optimized_input_tokens)} tokens
+            {formatNumber(optimizedPromptTokens)} prompt tokens
+          </span>
+          {hasAttachmentTokens ? (
+            <span className="rounded-full border border-border bg-soft px-2 py-1">
+              {formatNumber(optimizedAttachmentTokens)} file tokens preserved
+            </span>
+          ) : null}
+          <span className="rounded-full border border-border bg-soft px-2 py-1">
+            {formatNumber(recommendation.optimized_input_tokens)} total input
+            tokens
           </span>
           <span className="rounded-full border border-border bg-soft px-2 py-1">
-            {formatSignedNumber(recommendation.optimized_token_change)} token
-            delta
+            {formatSignedNumber(recommendation.optimized_token_change)} total
+            input delta
           </span>
           <span className="rounded-full border border-border bg-soft px-2 py-1">
             {formatPrice(recommendation.optimized_estimated_cost)}
@@ -397,15 +598,128 @@ function PromptTab({ recommendation, onUseRecommendation }) {
   );
 }
 
+function SweepTab({ sweepResult }) {
+  if (!sweepResult) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-white p-6 text-sm text-slate-500">
+        Run a quality sweep to measure baseline and candidate model outputs.
+      </div>
+    );
+  }
+
+  if (sweepResult.status === "unsupported") {
+    return (
+      <div className="rounded-lg border border-amber-100 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+        {sweepResult.message}
+      </div>
+    );
+  }
+
+  const baseline = sweepResult.baseline ?? {};
+  const recommendation = sweepResult.recommendation ?? null;
+  const candidates = Array.isArray(sweepResult.candidates)
+    ? sweepResult.candidates
+    : [];
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+        <p className="text-sm font-semibold text-ink">
+          Measured baseline: {baseline.model_name ?? baseline.model ?? "--"}
+        </p>
+        <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+          <span className="rounded-md bg-white px-2 py-1">
+            Cost {formatNullablePrice(baseline.actual_cost)}
+          </span>
+          <span className="rounded-md bg-white px-2 py-1">
+            Output {formatNullableNumber(baseline.completion_tokens)} tokens
+          </span>
+          <span className="rounded-md bg-white px-2 py-1">
+            Reasoning {formatNullableNumber(baseline.reasoning_tokens)} tokens
+          </span>
+          <span className="rounded-md bg-white px-2 py-1">
+            Latency {formatNullableNumber(baseline.latency_ms)} ms
+          </span>
+        </div>
+        {sweepResult.audit?.warnings?.length ? (
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-slate-600">
+            {sweepResult.audit.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      {recommendation ? (
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+          <p className="text-sm font-semibold text-ink">
+            Best measured substitute: {recommendation.model}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">
+            Preserved {formatWholePercent(recommendation.quality_retention_percent)}
+            {" "}quality and saved {formatWholePercent(recommendation.savings_percent)}
+            {" "}versus the selected baseline.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        {candidates.map((candidate) => (
+          <div
+            key={candidate.model_id}
+            className="rounded-lg border border-border bg-white p-3"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-ink">
+                  #{candidate.rank} {candidate.model}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Mode: {candidate.recommended_reasoning_mode}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 font-semibold text-primary">
+                  Quality retained {formatWholePercent(candidate.quality_retention_percent)}
+                </span>
+                <span className="rounded-full border border-emerald-100 bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                  Save {formatWholePercent(candidate.savings_percent)}
+                </span>
+                <span className="rounded-full border border-border bg-soft px-2 py-1 font-semibold text-slate-600">
+                  {formatNullablePrice(candidate.actual_cost)}
+                </span>
+              </div>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-600">
+              {candidate.judge?.rationale ??
+                candidate.substitution_label ??
+                "Candidate was compared against the selected baseline."}
+            </p>
+            {candidate.judge?.risk_flags?.length ? (
+              <p className="mt-1 text-xs leading-5 text-amber-700">
+                Risks: {candidate.judge.risk_flags.join(", ")}
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SuccessState({
   result,
   selectedModel,
   inputBreakdown,
-  onUseRecommendation
+  onUseRecommendation,
+  onOpenRankingGuide
 }) {
   const tabs = useMemo(
-    () => ["Estimate", "Recommendations", "Prompt"],
-    []
+    () =>
+      result?.sweep_result
+        ? ["Estimate", "Quality Sweep", "Recommendations", "Prompt"]
+        : ["Estimate", "Recommendations", "Prompt"],
+    [result?.sweep_result]
   );
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const recommendations = Array.isArray(result.optimization_recommendations)
@@ -416,7 +730,7 @@ function SuccessState({
   );
 
   useEffect(() => {
-    setActiveTab(tabs[0]);
+    setActiveTab(result?.sweep_result ? "Quality Sweep" : tabs[0]);
     setSelectedRecommendationId(recommendations[0]?.model_id ?? "");
   }, [result, recommendations, tabs]);
 
@@ -447,7 +761,12 @@ function SuccessState({
           selectedRecommendationId={selectedRecommendation?.model_id}
           onSelectRecommendation={setSelectedRecommendationId}
           onOpenPrompt={() => setActiveTab("Prompt")}
+          onOpenRankingGuide={onOpenRankingGuide}
         />
+      ) : null}
+
+      {activeTab === "Quality Sweep" ? (
+        <SweepTab sweepResult={result.sweep_result} />
       ) : null}
 
       {activeTab === "Prompt" ? (
@@ -467,7 +786,9 @@ export default function DashboardPanel({
   result,
   errorMessage,
   selectedModel,
-  onUseRecommendation
+  onUseRecommendation,
+  onOpenRankingGuide,
+  activeAction
 }) {
   const hasEstimate = state === "success" && result;
   const isLoading = state === "loading";
@@ -484,6 +805,29 @@ export default function DashboardPanel({
   const costValue = hasEstimate
     ? formatNullablePrice(result.estimated_cost)
     : "--";
+
+  const contextTotal = Number.isFinite(Number(selectedModel?.context_length))
+    ? Number(selectedModel.context_length)
+    : 0;
+  const estimatedOutput = hasEstimate && Number.isFinite(Number(result.predicted_output))
+    ? Number(result.predicted_output)
+    : 0;
+  const contextUsed = inputTokens + estimatedOutput;
+  const contextPercent = contextTotal > 0
+    ? Math.min((contextUsed / contextTotal) * 100, 100)
+    : 0;
+  const contextPercentFormatted = contextTotal > 0
+    ? `${contextPercent < 1 && contextPercent > 0 ? contextPercent.toFixed(2) : contextPercent.toFixed(1)}%`
+    : "--";
+  let contextPercentColor = "text-emerald-600";
+  let contextPercentHint = "Comfortable usage";
+  if (contextPercent >= 80) {
+    contextPercentColor = "text-red-600";
+    contextPercentHint = "Near context limit";
+  } else if (contextPercent >= 50) {
+    contextPercentColor = "text-amber-600";
+    contextPercentHint = "Moderate usage";
+  }
 
   return (
     <aside>
@@ -534,10 +878,48 @@ export default function DashboardPanel({
           />
         </div>
 
+        {contextTotal > 0 ? (
+          <>
+            <div className="mb-3 mt-5 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+                  Context estimate
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  How much of this model's context window your request uses.
+                </p>
+              </div>
+              <div className="hidden h-10 w-10 items-center justify-center rounded-lg border border-border bg-soft text-primary sm:flex">
+                <Layers className="h-5 w-5" />
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <StatCard
+                label="Context Window Used"
+                value={formatNumber(contextUsed)}
+                hint={hasEstimate ? "Input + estimated output" : "Input tokens only (pre-estimate)"}
+              />
+              <StatCard
+                label="Total Context Window"
+                value={formatNumber(contextTotal)}
+                hint="Model's maximum capacity"
+              />
+              <StatCard
+                label="Usage"
+                value={contextPercentFormatted}
+                hint={contextPercentHint}
+                valueClassName={contextPercentColor}
+              />
+            </div>
+          </>
+        ) : null}
+
         <div className="mt-3">
-          {isLoading ? <LoadingState /> : null}
+          {isLoading && activeAction === "sweep" ? <SweepLoadingState /> : null}
+          {isLoading && activeAction !== "sweep" ? <LoadingState /> : null}
           {!isLoading && hasError ? (
-            <ErrorState message={errorMessage} />
+            <ErrorState message={errorMessage} activeAction={activeAction} />
           ) : null}
           {!isLoading && !hasError && hasEstimate ? (
             <SuccessState
@@ -545,6 +927,7 @@ export default function DashboardPanel({
               selectedModel={selectedModel}
               inputBreakdown={inputBreakdown}
               onUseRecommendation={onUseRecommendation}
+              onOpenRankingGuide={onOpenRankingGuide}
             />
           ) : null}
           {!isLoading && !hasError && !hasEstimate ? <EmptyState /> : null}

@@ -10,6 +10,7 @@ Browser
   -> Render Web Service: Express backend
   -> OpenRouter public model catalog
   -> Optional OpenRouter estimator call from backend
+  -> Optional OpenRouter quality sweep and judge calls from backend
 ```
 
 The current app no longer requires n8n for the live analysis path. The `n8n/` folder remains only as a legacy workflow template.
@@ -21,7 +22,7 @@ Before starting, confirm you have:
 - A GitHub repository with this project pushed.
 - A Render account connected to GitHub.
 - Node.js services enabled in your Render account.
-- Optional: an OpenRouter API key if you want backend estimator calls instead of deterministic-only fallback.
+- Optional: an OpenRouter API key if you want backend estimator calls. Users can also enter their own OpenRouter key directly in the frontend when running Quality Sweep.
 
 You do not need an n8n Cloud instance for the main app.
 
@@ -54,6 +55,9 @@ CLIENT_ORIGIN=https://your-frontend-service.onrender.com
 OPENROUTER_API_KEY=
 OPENROUTER_ESTIMATOR_MODEL=openrouter/free
 OPENROUTER_TIMEOUT_MS=25000
+OPENROUTER_BASELINE_MEASUREMENT_ENABLED=false
+OPENROUTER_SWEEP_JUDGE_MODEL=openrouter/free
+OPENROUTER_SWEEP_MAX_TOKENS=1200
 ```
 
 Optional local-plus-production CORS configuration:
@@ -64,8 +68,11 @@ CLIENT_ORIGIN=https://your-frontend-service.onrender.com,http://localhost:5173
 
 Notes:
 
-- `OPENROUTER_API_KEY` is optional. Leave it blank to use deterministic backend estimation only.
-- If you set `OPENROUTER_API_KEY`, store it only in Render environment variables.
+- `OPENROUTER_API_KEY` is optional for instant estimates. Leave it blank to use deterministic backend estimation only.
+- If you set `OPENROUTER_API_KEY`, store it only in Render environment variables. Quality Sweep can also use a request-scoped key entered by the user in the browser.
+- Keep `OPENROUTER_BASELINE_MEASUREMENT_ENABLED=false` unless you intentionally want the backend to run the selected model for measured baseline usage. Turning it on can consume OpenRouter credits.
+- `OPENROUTER_SWEEP_JUDGE_MODEL` controls the judge used by **Run quality sweep**.
+- `OPENROUTER_SWEEP_MAX_TOKENS` caps each sweep model run. Lower values reduce cost but can truncate long answers.
 - Do not add secrets to GitHub source files.
 
 ## 3. Verify The Backend
@@ -198,8 +205,23 @@ Use this smoke test:
    - reasoning token estimate
    - billable output estimate
    - estimated cost
+   - context window used, total context window, and usage percentage
    - inferred output type
    - model and mode recommendations
+
+Optional quality sweep verification:
+
+1. Use a short, low-cost prompt first.
+2. Enter an OpenRouter API key in the Quality Sweep key field.
+3. Click **Run quality sweep**.
+4. Confirm the Quality Sweep tab shows:
+   - measured baseline usage
+   - candidate quality retention
+   - candidate savings
+   - latency
+   - judge rationale
+
+This action runs real model calls and can consume OpenRouter credits.
 
 ## 7. Troubleshooting
 
@@ -246,9 +268,24 @@ To enable OpenRouter estimator calls:
 OPENROUTER_API_KEY=your-openrouter-key
 OPENROUTER_ESTIMATOR_MODEL=openrouter/free
 OPENROUTER_TIMEOUT_MS=25000
+OPENROUTER_BASELINE_MEASUREMENT_ENABLED=false
+OPENROUTER_SWEEP_JUDGE_MODEL=openrouter/free
+OPENROUTER_SWEEP_MAX_TOKENS=1200
 ```
 
 If your OpenRouter account has no credits or the free route is rate-limited, the app falls back automatically.
+
+### Quality Sweep Says API Key Is Required
+
+`Run quality sweep` cannot use deterministic fallback because it must execute the selected baseline and candidate models. Enter an OpenRouter API key in the Quality Sweep field in the frontend. The key is used only for that request, is not stored by TokenOptimizer, and is cleared after the request finishes.
+
+For admin/local testing, you may also add a backend fallback key:
+
+```env
+OPENROUTER_API_KEY=your-openrouter-key
+```
+
+Then redeploy or restart the backend. Keep backend fallback keys out of GitHub and out of frontend environment variables.
 
 ### Render Free Service Sleeps
 
@@ -273,7 +310,8 @@ If it returns an error, Render may be blocked from reaching OpenRouter or OpenRo
 [ ] Frontend publish directory is dist
 [ ] VITE_API_BASE_URL points to the backend service
 [ ] CLIENT_ORIGIN points to the frontend service
-[ ] Optional OPENROUTER_API_KEY is set only in Render
+[ ] Optional OPENROUTER_API_KEY is set only in Render for estimator/admin fallback
+[ ] Users can enter an OpenRouter key in the Quality Sweep field for request-scoped sweeps
 [ ] /api/health returns {"status":"ok"}
 [ ] /api/models returns model data
 [ ] Frontend estimate flow works

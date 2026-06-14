@@ -90,3 +90,36 @@ export async function analyzePrompt(payload) {
 
   return data;
 }
+
+export async function runQualitySweep(payload, openRouterApiKey) {
+  const response = await fetch(`${API_BASE_URL}/api/sweep`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      ...payload,
+      openrouter_api_key: openRouterApiKey,
+      max_candidates: 3,
+      trials: 1
+    })
+  });
+
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("The server returned an invalid sweep response.");
+  }
+
+  if (!response.ok) {
+    throw new Error(getErrorMessage(data, "Unable to run the quality sweep right now."));
+  }
+
+  if (!isValidAnalysisPayload(data) || !data.sweep_result) {
+    throw new Error("The quality sweep response is incomplete.");
+  }
+
+  return data;
+}

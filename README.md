@@ -4,7 +4,7 @@ TokenOptimizer is a full-stack web application for estimating LLM usage cost bef
 
 The app is built as a monorepo with a React frontend and an Express backend. The frontend counts prompt and attachment input tokens locally. The backend fetches the broad live OpenRouter model catalog with `output_modalities=all`, avoids stale catalog caching, and performs backend-native estimation with deterministic fallback, so the app remains usable even when optional OpenRouter estimator calls are unavailable.
 
-TokenOptimizer is an estimator and decision-support tool. It does not guarantee exact provider billing and does not run the selected model as part of the main estimate flow.
+TokenOptimizer is an estimator and decision-support tool. It does not guarantee exact provider billing. The default path is a fast instant estimate. Users can also run an optional quality sweep by entering their OpenRouter API key at action time. The key is used only for that sweep request and is not stored by TokenOptimizer. The sweep executes the selected baseline and a small set of recommended alternatives through OpenRouter, then compares quality retention, cost, and latency. That sweep may consume OpenRouter credits.
 
 ## What It Does
 
@@ -14,7 +14,9 @@ TokenOptimizer is an estimator and decision-support tool. It does not guarantee 
 - Infers likely output type from the prompt instead of requiring a manual goal selector.
 - Accepts an optional free-text reasoning mode such as `Fast`, `Pro`, `Thinking`, `Adaptive Thinking`, or `budget_tokens=2048`.
 - Estimates visible output tokens, reasoning/thinking token overhead, total billable output tokens, and total cost.
-- Recommends cheaper model and reasoning-mode alternatives.
+- Shows context window usage: tokens used (input + estimated output), total context capacity, and a color-coded percentage (green for comfortable, yellow for moderate, red for near the limit).
+- Ranks model and reasoning-mode alternatives by Match Quality, with cost savings shown separately.
+- Runs an optional request-key quality sweep to measure whether candidate models preserve baseline output quality.
 - Produces optimized prompt variants with token and cost deltas.
 
 ## Product Documentation
@@ -46,6 +48,7 @@ External services:
 
 - OpenRouter public model catalog with broad output modality coverage
 - Optional OpenRouter estimator call from the backend
+- Optional OpenRouter quality sweep and judge calls from the backend
 
 ## Project Structure
 
@@ -77,7 +80,7 @@ The `n8n/` folder is retained as a legacy reference template. The main app no lo
 - Node.js 18 or newer
 - npm
 - Git
-- Optional: an OpenRouter API key if you want authenticated catalog requests and backend estimator refinement
+- Optional: an OpenRouter API key if you want authenticated catalog requests and backend estimator refinement. Quality Sweep can also use a key entered in the browser for one request only.
 
 Recommended local ports:
 
@@ -110,15 +113,21 @@ CLIENT_ORIGIN=http://localhost:5173
 OPENROUTER_API_KEY=
 OPENROUTER_ESTIMATOR_MODEL=openrouter/free
 OPENROUTER_TIMEOUT_MS=25000
+OPENROUTER_BASELINE_MEASUREMENT_ENABLED=false
+OPENROUTER_SWEEP_JUDGE_MODEL=openrouter/free
+OPENROUTER_SWEEP_MAX_TOKENS=1200
 ```
 
 Variable notes:
 
 - `PORT`: backend port.
 - `CLIENT_ORIGIN`: comma-separated allowed frontend origins for CORS.
-- `OPENROUTER_API_KEY`: optional. When present, the backend can call OpenRouter for structured estimation and authenticated model catalog requests.
+- `OPENROUTER_API_KEY`: optional. When present, the backend can call OpenRouter for structured estimation, authenticated model catalog requests, and admin/local sweep fallback. Normal users can instead enter an OpenRouter key only when running Quality Sweep.
 - `OPENROUTER_ESTIMATOR_MODEL`: optional estimator model. Defaults to `openrouter/free`.
 - `OPENROUTER_TIMEOUT_MS`: timeout for optional estimator calls.
+- `OPENROUTER_BASELINE_MEASUREMENT_ENABLED`: optional legacy estimate-path flag. Keep `false` unless you intentionally want `/api/analyze` to run the selected model for a measured baseline.
+- `OPENROUTER_SWEEP_JUDGE_MODEL`: optional judge model for `/api/sweep`. Defaults to the estimator model or `openrouter/free`.
+- `OPENROUTER_SWEEP_MAX_TOKENS`: maximum completion tokens per model run in a quality sweep. Lower values reduce cost but can truncate long outputs.
 
 Create your frontend environment file only if you want to override the default backend URL:
 
@@ -282,6 +291,34 @@ Additional optional fields may include:
 - `reasoning_mode_rationale`
 - `mode_cost_delta`
 - `optimization_recommendations`
+- `overall_rank_score`
+- `rank_score_breakdown`
+
+### `POST /api/sweep`
+
+Runs the selected model and up to three recommended alternatives through OpenRouter, then judges candidate output against a blinded selected-model baseline. This endpoint requires either `openrouter_api_key` in the request body or the optional backend `OPENROUTER_API_KEY` fallback. It may consume credits from the provided key.
+
+Payload is the same as `/api/analyze`, with optional controls:
+
+```json
+{
+  "openrouter_api_key": "<request-scoped-openrouter-key>",
+  "max_candidates": 3,
+  "trials": 1
+}
+```
+
+`openrouter_api_key` is request-scoped. The frontend keeps it in memory only, sends it only to `/api/sweep`, and clears it after the request finishes. TokenOptimizer does not store or return the key.
+
+The response includes the normal estimate fields plus:
+
+- `sweep_result.credential_source`: `request_key` or `environment_key`.
+- `sweep_result.credit_required`: `true`.
+- `sweep_result.measurement_source`: `openrouter`.
+- `sweep_result.baseline`: measured selected-model usage, cost, latency, finish reason, and output preview.
+- `sweep_result.candidates`: measured candidate usage, quality retention, savings, cost per accepted answer, latency, and judge rationale.
+- `sweep_result.recommendation`: best measured quality-preserving substitute.
+- `sweep_result.audit`: inferred task/output rubric and any warnings, such as attachment-only metadata limits.
 
 ## Reasoning Mode Input
 
@@ -310,15 +347,69 @@ TokenOptimizer separates the estimate into plain-language parts:
 - `Total output tokens`: estimated answer tokens plus thinking tokens.
 - `Estimated price`: input cost plus output cost using the selected model prices.
 
-For text-like outputs, the main formula is:
+For text-like outputs, the plain-English formula is:
 
 ```text
-Estimated price =
-input tokens x input price / 1,000
-+ total output tokens x output price / 1,000
+Estimated Price = (Text sent × input price) + (Estimated answer length × output price)
 ```
+Prices are calculated per 1,000 tokens (which are just small chunks of text, roughly 3/4 of a word).
 
 For image, audio, and video-style outputs, TokenOptimizer uses the input-token cost plus a modality-aware output estimate rather than pretending every output behaves like normal text.
+
+Here is a visual overview of how the estimation workflow works for a non-technical user:
+
+```mermaid
+graph TD
+    Input[User Input: Prompt & Files] --> Tokens[1. Tokenizer: Counts small chunks of text]
+    Tokens --> PredictSize[2. Predicts Output Size & Thinking effort]
+    PredictSize --> CalculateCost[3. Calculates Estimated Price]
+    CalculateCost --> Recommend[4. Recommends Cheaper Alternatives]
+    Recommend --> MatchScore[5. Calculates Match Quality: 0% to 100%]
+    Recommend --> Reliability[6. Rates Estimate Reliability: High, Medium, or Low]
+```
+
+## How Recommendation Match Quality Works
+
+Recommendations are not sorted by cheapest price alone. TokenOptimizer uses a score called **Match Quality** (from 0% to 100%). It answers:
+
+> If I switch from my selected model and reasoning mode to this recommended model and mode, how likely is it that useful output quality will be preserved without losing important details?
+
+To make this easy for non-technical users to understand, the dashboard's calculation explainer displays these as simple predictability ratings (**High reliability**, **Medium reliability**, or **Low reliability**) along with the percentage, hiding complex math formulas and internal system heuristics.
+
+The selected model is treated as the baseline. By default this baseline is estimated by the backend. If you deliberately enable `OPENROUTER_BASELINE_MEASUREMENT_ENABLED=true`, the backend can run the selected model through OpenRouter and use response usage metadata as the baseline. That option may consume OpenRouter credits and is disabled by default.
+
+| Factor | Max Points | Sub-score breakdown |
+| --- | ---: | --- |
+| Capability match | 30 | Baseline tier proximity `10`, model capacity `7`, family signal `4`, specialization `5`, downgrade safety `4`. Family credit is intentionally small so familiar model names do not dominate the score. |
+| Task and output fit | 20 | Modality/artifact match `7`, task pattern match `5`, complexity handling `5`, format/constraint fit `3`. |
+| Reasoning-mode equivalence | 20 | Mode match `7`, reasoning support `5`, prompt complexity adequacy `5`, cheaper-mode safety `3`. |
+| Context and attachment safety | 15 | Context occupancy `7`, attachment room `4`, output/reasoning headroom `2`, metadata certainty `2`. |
+| Reliability and metadata confidence | 10 | Complete metadata `3`, stable route `3`, pricing/parameter clarity `2`, non-expired/non-deprecated signal `2`. |
+| Cost-risk adjustment | 5 | Meaningful savings `2`, savings not caused by a severe downgrade `2`, attachment-safe cost math `1`. |
+
+Score bands:
+
+- `90-100%`: very likely equivalent (Excellent Match Quality)
+- `80-89%`: strong alternative (Good Match Quality)
+- `70-79%`: reasonable tradeoff (Fair Match Quality)
+- `55-69%`: risky but possibly acceptable (Low Match Quality)
+- `<55%`: not recommended for quality-sensitive use (Poor Match Quality)
+
+Cost savings are shown as a separate badge and only affect confidence through the small cost-risk adjustment. Attachment tokens remain part of all recommendation math. If an optimized prompt reduces prompt text, TokenOptimizer compares `optimized prompt tokens + unchanged attachment tokens` against `original prompt tokens + attachment tokens`.
+
+The scorer also applies guardrails after raw scoring. Known model family signals cannot add more than `4` capability points, weak task/context fit caps confidence, modality mismatch caps confidence at `55`, risky context usage caps confidence at `70` or `55`, missing pricing/context metadata caps confidence at `80`, and premium-to-light or high-reasoning downgrades are capped for complex prompts. These caps keep recommendations from ranking highly just because they are cheap or belong to a familiar model family.
+
+## How Quality Sweep Works
+
+The quality sweep is the evidence-backed path inspired by eval-first model selection workflows:
+
+1. Use the request-scoped OpenRouter key, or the optional backend fallback key, to run the selected model and reasoning mode as the baseline through OpenRouter.
+2. Use the current recommendation engine to shortlist up to three candidate model/mode combinations.
+3. Run candidates through OpenRouter with the same prompt and attachment metadata.
+4. Judge anonymized baseline and candidate answers with a dimension rubric: instruction following, completeness, task-specific quality, structure/format, factual grounding, and brevity.
+5. Rank candidates by measured quality retention first, then cost per accepted answer, then latency.
+
+Quality sweep results show measured quality retention for that run compared to the baseline. The UI displays this comparison directly: *"Best Result: [Model Name] kept [X%] of the original quality while saving [Y%] compared to the original model."* The UI labels the difference so users do not confuse a pre-flight heuristic estimate with a measured comparative test. Users should create a limited OpenRouter key for TokenOptimizer, set OpenRouter-side usage limits where available, and rotate/delete the key if they no longer need sweeps.
 
 ## Attachment Estimation
 
@@ -336,7 +427,7 @@ The recommended free-friendly deployment path is Render:
 
 - Render Static Site for the frontend.
 - Render Web Service for the backend.
-- OpenRouter key stored only in backend environment variables if authenticated catalog requests or estimator calls are enabled.
+- OpenRouter key stored only in backend environment variables if authenticated catalog requests or estimator calls are enabled. Quality Sweep can use a temporary user-provided key instead of backend storage.
 
 See [Render_deployment.md](./Render_deployment.md) for the full deployment guide.
 

@@ -1,13 +1,13 @@
 # TokenOptimizer PRD
 
-Version: 1.1  
-Date: May 14, 2026  
+Version: 1.4  
+Date: May 28, 2026  
 Author / Role: Saurabh Patil - Product Builder  
 Status: MVP / In Progress  
 
 ## One-Line Product Statement
 
-TokenOptimizer helps users estimate LLM prompt cost before execution by showing prompt size, file impact, likely output tokens, reasoning-mode overhead, model pricing, and cheaper prompt/model alternatives.
+TokenOptimizer helps users estimate LLM prompt cost before execution and find quality-preserving model or mode alternatives by comparing likely savings against the selected model baseline.
 
 ## Table Of Contents
 
@@ -37,7 +37,7 @@ TokenOptimizer helps users estimate LLM prompt cost before execution by showing 
 
 TokenOptimizer is a full-stack web application that helps people estimate LLM usage cost before running a prompt. The product is built for users who work with AI models frequently and want to understand the cost impact of their prompt, files, model choice, and optional reasoning mode before they spend credits.
 
-The current MVP is a web application with a React frontend and an Express backend. The frontend counts prompt tokens locally, estimates attachment token impact without uploading file contents, and keeps the model catalog fresh with manual and background refresh. The backend pulls the broad OpenRouter catalog with `output_modalities=all`, infers the likely output type from the prompt, estimates expected output size, adds reasoning-mode overhead, calculates price, and recommends cheaper model or prompt alternatives.
+The current MVP is a web application with a React frontend and an Express backend. The frontend counts prompt tokens locally, estimates attachment token impact without uploading file contents, and keeps the model catalog fresh with manual and background refresh. The backend pulls the broad OpenRouter catalog with `output_modalities=all`, infers the likely output type from the prompt, estimates expected output size, adds reasoning-mode overhead, calculates price, and recommends cheaper model or prompt alternatives. For higher-stakes decisions, an optional quality sweep can use a request-scoped OpenRouter API key entered by the user to run the selected model and a small candidate shortlist through OpenRouter, then compare output quality, savings, and latency.
 
 The product solves a practical problem: most users do not know how expensive a prompt may become until after it is executed. This is especially painful when prompts are long, files are attached, expensive models are selected, or reasoning modes like Pro, Thinking, Adaptive Thinking, or custom token budgets are used.
 
@@ -192,11 +192,14 @@ Before spending model credits, the user should know:
 | User selects model | Frontend loads the live OpenRouter catalog, shows the last refresh time, and lets the user refresh without reloading the app. |
 | User enters reasoning mode | Backend interprets the text as Fast, Standard, Thinking, Pro, or custom budget. |
 | User clicks Estimate cost | Backend infers output type, estimates answer size, adds reasoning overhead, and calculates cost. |
+| User runs Quality Sweep | User enters an OpenRouter API key for that request; backend uses it to run the selected baseline, candidates, and judge. |
 | User reviews result | Dashboard shows cost, tokens, recommendations, and optimized prompt suggestions. |
 
-### What the product does not do today
+### What the product does not do by default
 
-TokenOptimizer does not run the selected model and does not guarantee exact billing. It estimates cost before execution. Exact measurement may be added later, but the current MVP is intentionally focused on pre-flight decision support.
+TokenOptimizer does not run the selected model in the default `Estimate cost` path and does not guarantee exact billing. The default path estimates cost before execution.
+
+The product also offers an optional `Run quality sweep` path. This path can consume OpenRouter credits because it runs the selected model as a baseline, runs a short candidate list, and judges whether cheaper options preserve useful output quality. The user can enter an OpenRouter API key only for that request; TokenOptimizer does not store it. It is intentionally separate from the instant estimate so users can choose speed and zero execution cost, or choose evidence-backed comparison when the decision matters.
 
 ---
 
@@ -219,6 +222,7 @@ The current MVP is a deployable web application.
 | Reasoning mode | Optional textbox accepts values like Fast, Pro, Thinking, Adaptive Thinking, high, low, or budget tokens. |
 | Cost estimate | Calculates input cost plus estimated output cost. |
 | Recommendations | Suggests cheaper model, reasoning mode, and prompt improvements. |
+| Quality sweep | Optionally uses a request-scoped OpenRouter key to run the selected model and up to three recommended alternatives, then compares quality retention, cost, and latency. |
 | Optimized prompts | Produces model-aware optimized prompt suggestions. |
 | Deployment | Supports Render frontend and backend deployment. |
 
@@ -233,7 +237,8 @@ The current backend has moved the core estimation logic into Express services. T
 - User accounts
 - Prompt history
 - Team dashboards
-- Exact OpenRouter generation measurement
+- Running every OpenRouter model as a candidate
+- Guaranteed billing reconciliation
 - Chrome extension
 - Browser-injected prompt assistant
 - Billing system
@@ -300,7 +305,9 @@ The current backend has moved the core estimation logic into Express services. T
 | Reasoning mode textbox | Lets users type optional mode hints like Fast, Pro, Thinking, or token budgets. | Helps estimate hidden thinking-mode overhead. |
 | Backend prompt inference | Reads prompt language and infers output modality and artifact type. | Removes need for users to manually choose output goal. |
 | Cost estimate dashboard | Shows prompt/file tokens, estimated output tokens, thinking-mode tokens, total output tokens, and price. | Gives a clear pre-flight cost view. |
-| Recommendations | Suggests cheaper model/mode alternatives. | Helps reduce cost without making users search manually. |
+| Context window usage | Shows context window used (input + estimated output), total context capacity, and a color-coded usage percentage (green, yellow, red). | Helps users see at a glance whether their prompt fits comfortably or is near the model's limit. |
+| Recommendations | Ranks model/mode alternatives with a Match Quality score and a separate savings badge. | Helps users find quality-preserving savings instead of simply picking the cheapest model. |
+| Quality sweep | Optionally runs the selected baseline and a candidate shortlist through OpenRouter, then judges quality retention. | Helps users validate whether a cheaper switch actually preserves quality for that prompt. |
 | Optimized prompt | Generates a ready-to-use prompt tailored to the recommended model and output type. | Helps improve prompt quality and cost efficiency. |
 | Calculation explainer | Explains how the estimate was calculated. | Builds user trust and makes the numbers easier to understand. |
 | Secure backend handling | Keeps API keys on backend only. | Prevents frontend exposure of sensitive credentials. |
@@ -314,7 +321,7 @@ TokenOptimizer has three main layers:
 
 1. Frontend local analysis layer
 2. Backend estimation and recommendation layer
-3. External model catalog and optional estimator layer
+3. External model catalog, optional estimator, and optional quality sweep layer
 
 ### Architecture diagram
 
@@ -342,6 +349,11 @@ flowchart TD
     R --> S["Optimization recommendation service"]
     S --> T["Dashboard response"]
     T --> B
+    B --> U["POST /api/sweep"]
+    U --> V["Run selected baseline through OpenRouter"]
+    V --> W["Run shortlisted candidates"]
+    W --> X["Blind judge with quality rubric"]
+    X --> T
 ```
 
 ### Frontend local estimation layer
@@ -372,6 +384,8 @@ The backend is the trusted server-side layer. It receives the analysis payload a
 - Deterministic fallback estimation
 - Cost calculation
 - Recommendation generation
+- Optional quality sweep execution
+- Blind judge scoring for measured candidate comparisons
 - API response normalization
 
 ### OpenRouter catalog layer
@@ -459,22 +473,107 @@ input tokens x input price / 1,000
 
 For media-like outputs, it uses the input cost plus a flat/unit-style estimate because image, audio, and video outputs are not always billed like normal text tokens.
 
+If `OPENROUTER_BASELINE_MEASUREMENT_ENABLED=true` and an `OPENROUTER_API_KEY` is configured, the backend can optionally run the selected model through OpenRouter and use response usage metadata as the selected-model baseline. This may consume OpenRouter credits and is disabled by default. When disabled or unavailable, the backend estimate becomes the baseline.
+
 ### Optimization recommendation service
 
-The recommendation service compares candidate models from the loaded catalog. It estimates cost using the same token profile and returns the top alternatives.
+The recommendation service compares candidate models from the loaded catalog against the selected model baseline. It estimates candidate cost using the same prompt, attachments, likely answer size, and recommended reasoning mode.
+
+Recommendations are not sorted by cheapest price alone. The backend calculates a score called **Match Quality** (from 0% to 100%):
+
+> If the user switches from the selected model and reasoning mode to this candidate model and mode, how likely is it that useful output quality will be preserved without losing important details?
+
+The score is a 100-point heuristic:
+
+| Confidence Factor | Max Points | Sub-score Breakdown |
+| --- | ---: | --- |
+| Capability match | 30 | Baseline tier proximity `10`, model capacity `7`, family signal `4`, specialization `5`, downgrade safety `4`. |
+| Task and output fit | 20 | Modality/artifact match `7`, task pattern match `5`, complexity handling `5`, format/constraint fit `3`. |
+| Reasoning-mode equivalence | 20 | Mode match `7`, reasoning support `5`, prompt complexity adequacy `5`, cheaper-mode safety `3`. |
+| Context and attachment safety | 15 | Context occupancy `7`, attachment room `4`, output/reasoning headroom `2`, metadata certainty `2`. |
+| Reliability and metadata confidence | 10 | Complete metadata `3`, stable route `3`, pricing/parameter clarity `2`, non-expired/non-deprecated signal `2`. |
+| Cost-risk adjustment | 5 | Meaningful savings `2`, savings not caused by a severe downgrade `2`, attachment-safe cost math `1`. |
+
+Score bands map to user-friendly quality labels in the UI:
+
+| Score | UI Match Quality Label | Meaning |
+| --- | --- | --- |
+| 90-100% | Excellent Match Quality | Best choice when output quality preservation matters most. |
+| 80-89% | Good Match Quality | A strong switch candidate with controlled risk. |
+| 70-79% | Fair Match Quality | Useful when savings matter and some quality risk is acceptable. |
+| 55-69% | Low Match Quality | Consider only for low-stakes work or manual review. |
+| Below 55% | Poor Match Quality | Savings likely come with too much output risk. |
+
+To make these calculations understandable to non-technical users, the dashboard hides mathematical formulas and internal heuristic baselines, presenting instead:
+1. **Estimate reliability**: Predictability is labeled as **High reliability** (>=80%), **Medium reliability** (50-80%), or **Low reliability** (<50%) based on the prediction confidence.
+2. **Recommended model match quality**: Explained as a simple likelihood percentage that the recommended cheaper model can do the job without losing details.
+3. **Real-world quality sweep results**: Formatted as a simple result summary showing the percentage of original quality kept and the percentage of cost saved.
+
+The system applies confidence caps after raw scoring:
+
+| Guardrail | Cap | Why It Exists |
+| --- | ---: | --- |
+| Family bias cap | N/A | Known-family credit is capped at `4/30` capability points so model names do not dominate. |
+| Weak task/context fit | 70 | A familiar model family cannot rescue weak task fit or unsafe context fit. |
+| Premium-to-light downgrade | 75 | Complex prompts should not treat premium-to-light/free switches as high-confidence. |
+| Modality mismatch | 55 | A model that does not advertise the inferred output modality should not rank highly. |
+| Context risk | 70 or 55 | Models near context limits are capped because attachments or output may be squeezed. |
+| Missing metadata | 80 | Missing context or pricing metadata lowers trust in the comparison. |
+| High reasoning mismatch | 78 | Pro/deep/high baselines should not be replaced by weak reasoning modes without a cap. |
+| Free-route reliability | 85 | Free routes can be good for simple work, but complex work needs strong fit signals. |
+
+The score is directional. It is meant to explain tradeoffs, not guarantee measured post-run accuracy. Attachment tokens are preserved in recommendation cost math, so optimized prompt deltas do not accidentally remove file cost from the comparison.
 
 Each recommendation can include:
 
 - Model name and ID
 - Estimated cost
 - Savings percent
-- Confidence score
+- Match Quality percentage
+- Match Quality label and basis
+- Confidence factor breakdown
+- Baseline usage profile
+- Candidate usage estimate
 - Suggested reasoning mode
 - Prompt strategy
 - Optimized prompt
 - Token delta
 - Cost delta
 - Changes made
+
+### Optional quality sweep service
+
+The quality sweep is the evidence-backed path. It should be used when the user wants to know whether a cheaper model can preserve output quality for this specific task. The user enters an OpenRouter API key at action time. The key is used only for the sweep request, is not stored by TokenOptimizer, and is cleared from frontend memory after the request finishes.
+
+The sweep flow is:
+
+1. Build the same analysis baseline used by the instant estimate.
+2. Use the request-scoped OpenRouter key, or the optional backend fallback key, to run the selected model and reasoning mode through OpenRouter as the baseline.
+3. Shortlist up to three recommended candidate model/mode pairs.
+4. Run each candidate with the same prompt and attachment metadata.
+5. Judge anonymized baseline and candidate outputs using a dimension-based rubric.
+6. Rank candidates by measured quality retention first, then cost per accepted answer, then latency.
+
+The judge dimensions are:
+
+| Dimension | What It Checks |
+| --- | --- |
+| Instruction following | Did the answer follow the user's task and constraints? |
+| Completeness | Did it cover the required parts of the prompt? |
+| Task-specific quality | Did it solve the actual job, such as report writing, code planning, or synthesis? |
+| Structure and format | Did it follow requested tables, sections, headings, or output format? |
+| Factual grounding | Did it avoid unsupported claims and respect available context? |
+| Brevity | Did it avoid unnecessary verbosity while still being complete? |
+
+The sweep does not upload file bytes. If a prompt depends heavily on hidden attachment contents, the audit warning explains that judging is based on prompt and attachment metadata only. The feature is useful for comparing model behavior on visible prompt instructions, but it is not a replacement for human review or domain-specific factual evals.
+
+Quality Sweep security rules:
+
+- The browser stores the OpenRouter key only in React memory.
+- The key is sent only to `POST /api/sweep`.
+- The backend never returns the key.
+- Upstream key-like values are redacted from error responses.
+- Backend environment keys remain optional admin/local fallbacks, not a requirement for normal users.
 
 ---
 
@@ -725,6 +824,8 @@ The golden dataset should include common and edge-case prompts.
 | Fast mode | Reasoning mode `Fast`. | Lower thinking overhead. |
 | Pro mode | Reasoning mode `Pro`. | Higher thinking overhead. |
 | OpenRouter failure | Estimator unavailable. | Deterministic backend estimate still returns success. |
+| Quality sweep | Run a baseline plus two candidates with an OpenRouter key. | Response includes baseline usage, candidate usage, quality retention, savings, latency, and judge rationale. |
+| Sweep without key | Call `/api/sweep` without `OPENROUTER_API_KEY`. | API returns a clear key-required error while `/api/analyze` still works. |
 
 ### Offline evals
 
@@ -736,7 +837,8 @@ The golden dataset should include common and edge-case prompts.
 | Attachment estimate sanity | Whether file metadata produces reasonable token estimates. | Estimates are non-negative and confidence is shown. |
 | API schema validation | Whether `/api/analyze` returns required fields. | Always returns stable success shape on valid input. |
 | Fallback reliability | Whether app works without OpenRouter estimator. | No valid request fails only because estimator is unavailable. |
-| Recommendation sanity | Whether cheaper recommendations are sorted by cost and context length. | Top recommendations are cheaper or clearly explained. |
+| Recommendation confidence sanity | Whether recommendations follow the Match Quality rubric. | Top recommendations show Match Quality percentage, savings, and factor breakdown without ranking only by cheapest price. |
+| Sweep judge sanity | Whether measured candidates are judged against anonymized baseline output. | Candidate score uses dimension scores and does not expose model names to the judge prompt. |
 | Catalog metadata coverage | Whether `/api/models` includes modalities, pricing, provider limits, and freshness timestamp. | Response includes broad model metadata and `refreshed_at`. |
 
 ### Online evals
@@ -750,6 +852,8 @@ Online evals measure real usage behavior.
 | Catalog refresh success rate | Manual and background refreshes that complete without clearing the current catalog. | Shows whether the model list stays fresh and reliable. |
 | Error rate | Failed analyze requests divided by total requests. | Tracks product health. |
 | Optimized prompt copy rate | Users who copy or use optimized prompts. | Shows whether recommendations are useful. |
+| Quality sweep completion rate | Users who run a sweep after an estimate. | Shows whether users value evidence-backed model substitution. |
+| Sweep accepted alternative rate | Sweeps where a candidate preserves at least 80% quality and saves money. | Measures whether the product finds useful quality-preserving savings. |
 | Repeat usage | Users who return and estimate again. | Shows product stickiness. |
 | Trust score | User feedback on whether estimate felt useful. | Measures confidence in the product. |
 
@@ -810,14 +914,16 @@ Reviewers should check:
 
 | Risk | Impact | Likelihood | Mitigation |
 | --- | --- | --- | --- |
-| Estimates do not match actual provider billing | Users may lose trust. | Medium | Clearly label as estimate; add exact measurement later as optional feature. |
+| Estimates do not match actual provider billing | Users may lose trust. | Medium | Clearly label instant results as estimates and offer the optional quality sweep when users need measured usage. |
 | OpenRouter catalog changes | Model list, pricing, or metadata shape may change. | Medium | Normalize catalog response, preserve richer metadata, use no-store responses, and keep the last successful catalog on refresh failure. |
 | Newly launched models have upstream delay | Users may not see a model until OpenRouter publishes it through the API. | Medium | Explain that OpenRouter is the source of truth and provide manual refresh plus background refresh. |
 | Reasoning modes differ by provider | Mode estimates may be approximate. | High | Treat user-entered mode as estimation metadata, not guaranteed provider config. |
 | Users do not want to leave their AI tool | Web app may feel like extra work. | High | Consider Chrome extension after validating web MVP. |
-| Free model recommendations seem low-quality | Users may distrust suggestions. | Medium | Show confidence and mode rationale, not just cheapest cost. |
+| Free model recommendations seem low-quality | Users may distrust suggestions. | Medium | Rank by Match Quality first and savings second, so free models do not automatically win when output risk is high. |
 | Large files create inaccurate estimates | File token impact may be approximate. | Medium | Show confidence level and estimation method. |
 | Optional OpenRouter estimator fails | Estimate quality may drop. | Medium | Deterministic fallback keeps product working. |
+| Quality sweep consumes credits | Users may be surprised by paid model execution. | Medium | Keep sweep as a separate button with explicit credit-use copy and a small candidate limit. |
+| Judge model may be imperfect | Measured quality retention may still be subjective. | Medium | Use dimension-based blinded judging, show rationale, and keep human review as the final authority for high-stakes work. |
 | Users misunderstand thinking tokens | Dashboard may feel technical. | Medium | Use plain-language explanation in About and calculation accordion. |
 | Secrets accidentally committed | Security risk. | Low if process followed | `.env` ignored, examples use placeholders, secrets live in Render env only. |
 
@@ -953,7 +1059,7 @@ The following are intentionally outside the current MVP:
 
 | Item | Reason |
 | --- | --- |
-| Running the selected model directly | This would consume credits and change product from estimator to execution tool. |
+| Running every candidate model by default | This would multiply cost and slow the product. The sweep runs only when explicitly requested and only for a small shortlist. |
 | Exact billing guarantee | Provider billing can vary by tokenizer, cache, reasoning behavior, and model routing. |
 | User accounts | Not required for MVP validation. |
 | Prompt history | Useful later, but requires storage and privacy decisions. |
@@ -974,7 +1080,7 @@ The following are intentionally outside the current MVP:
 | Should prompt history be stored? | Helps repeat users but raises privacy and account questions. |
 | Should users bring their own OpenRouter key? | Reduces product cost but adds setup friction. |
 | What accuracy level is acceptable for estimates? | Defines eval pass/fail thresholds. |
-| Should model recommendations prioritize cost or quality? | Cheapest model may not always be best. |
+| Should model recommendations prioritize cost or quality? | Current MVP prioritizes Match Quality first and cost savings second. |
 | Should teams have approved model policies? | Important for B2B but not MVP. |
 | Should media outputs have provider-specific pricing? | Current media estimates are simplified. |
 
@@ -1100,9 +1206,118 @@ Optional response fields:
   "prediction_method": "backend_deterministic_estimator",
   "prediction_confidence": 0.68,
   "prediction_notes": [],
-  "optimization_recommendations": []
+  "optimization_recommendations": [
+    {
+      "model": "Example model",
+      "estimated_cost": 0.0009,
+      "savings_percent": 54,
+      "confidence_score": 0.86,
+      "confidence_percent": 86,
+      "confidence_label": "Strong alternative",
+      "confidence_basis": "Expected to preserve useful output quality versus the selected model baseline.",
+      "confidence_score_before_guardrails": 89,
+      "confidence_guardrails": [
+        {
+          "name": "Free-route reliability cap",
+          "applied": true,
+          "cap": 85,
+          "reason": "Free routes can be useful, but complex prompts need stronger fit signals."
+        }
+      ],
+      "confidence_breakdown": [
+        {
+          "factor": "Capability match",
+          "earned": 24,
+          "max": 30,
+          "band": "Acceptable fit",
+          "reason": "Candidate capability is acceptable, with visible tradeoff risk.",
+          "sub_scores": [
+            {
+              "name": "Family signal",
+              "earned": 4,
+              "max": 4,
+              "signal": "Known broad model family, capped at 4 points to avoid family bias."
+            }
+          ]
+        }
+      ],
+      "rank_score_breakdown": {
+        "overall": {
+          "score_out_of_100": 86,
+          "max_points": 100
+        },
+        "factors": []
+      },
+      "baseline_usage": {},
+      "candidate_usage_estimate": {}
+    }
+  ]
 }
 ```
+
+#### Quality sweep
+
+```http
+POST /api/sweep
+```
+
+The request uses the same payload shape as `/api/analyze`, plus optional sweep controls:
+
+```json
+{
+  "prompt": "Create a detailed report with comparison table and citations.",
+  "model": "openai/gpt-4o-mini",
+  "reasoning_mode": "Standard",
+  "input_tokens": 1200,
+  "prompt_tokens": 700,
+  "attachment_tokens": 500,
+  "input_attachments": [],
+  "input_price": 0.0015,
+  "output_price": 0.002,
+  "candidate_models": [],
+  "openrouter_api_key": "<request-scoped-openrouter-key>",
+  "max_candidates": 3,
+  "trials": 1
+}
+```
+
+The response includes the normal estimate fields plus:
+
+```json
+{
+  "sweep_result": {
+    "status": "completed",
+    "credential_source": "request_key",
+    "credit_required": true,
+    "measurement_source": "openrouter",
+    "baseline": {
+      "model": "openai/gpt-4o-mini",
+      "actual_cost": 0.0024,
+      "completion_tokens": 900,
+      "reasoning_tokens": 0,
+      "latency_ms": 1800,
+      "output_preview": "Generated baseline answer..."
+    },
+    "candidates": [
+      {
+        "model": "Example alternative",
+        "quality_retention_percent": 86,
+        "savings_percent": 42,
+        "actual_cost": 0.0014,
+        "cost_per_accepted_answer": 0.0016,
+        "latency_ms": 1500,
+        "judge": {
+          "judge_source": "openrouter_judge",
+          "rationale": "Candidate preserved structure and most required details."
+        }
+      }
+    ],
+    "recommendation": {}
+  }
+}
+```
+
+This endpoint requires either `openrouter_api_key` in the request body or the optional backend `OPENROUTER_API_KEY` fallback, and may consume OpenRouter credits. It is intentionally separate from `/api/analyze`. The request key is temporary and should never be saved in local storage, frontend environment variables, source files, screenshots, or logs.
 
 ### Cost formula
 
@@ -1149,6 +1364,9 @@ CLIENT_ORIGIN=https://your-frontend-service.onrender.com
 OPENROUTER_API_KEY=<stored only in Render>
 OPENROUTER_ESTIMATOR_MODEL=openrouter/free
 OPENROUTER_TIMEOUT_MS=25000
+OPENROUTER_BASELINE_MEASUREMENT_ENABLED=false
+OPENROUTER_SWEEP_JUDGE_MODEL=openrouter/free
+OPENROUTER_SWEEP_MAX_TOKENS=1200
 ```
 
 Frontend environment variable:
@@ -1168,11 +1386,13 @@ VITE_API_BASE_URL=https://your-backend-service.onrender.com
 | API client | `frontend/src/lib/api.js` |
 | Express app | `backend/src/app.js` |
 | Analyze route | `backend/src/routes/analyze.js` |
+| Quality sweep route | `backend/src/routes/sweep.js` |
 | Model catalog route | `backend/src/routes/models.js` |
 | Prompt inference | `backend/src/services/promptInferenceService.js` |
 | Reasoning mode parsing | `backend/src/services/reasoningModeService.js` |
 | Estimation service | `backend/src/services/analysisEstimatorService.js` |
 | Recommendations | `backend/src/services/optimizationService.js` |
+| Quality sweep service | `backend/src/services/sweepService.js` |
 
 ### PRD summary
 

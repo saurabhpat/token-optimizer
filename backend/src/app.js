@@ -4,6 +4,7 @@ import { env } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import analyzeRouter from "./routes/analyze.js";
 import modelsRouter from "./routes/models.js";
+import sweepRouter from "./routes/sweep.js";
 
 export const app = express();
 
@@ -35,6 +36,7 @@ app.get("/api/health", (_request, response) => {
 
 app.use("/api/models", modelsRouter);
 app.use("/api/analyze", analyzeRouter);
+app.use("/api/sweep", sweepRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

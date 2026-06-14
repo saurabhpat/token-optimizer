@@ -15,6 +15,17 @@ export const env = {
     process.env.OPENROUTER_TIMEOUT_MS ?? "25000",
     10
   ),
+  openRouterBaselineMeasurementEnabled: /^(1|true|yes)$/i.test(
+    process.env.OPENROUTER_BASELINE_MEASUREMENT_ENABLED?.trim() ?? ""
+  ),
+  openRouterSweepJudgeModel:
+    process.env.OPENROUTER_SWEEP_JUDGE_MODEL?.trim() ||
+    process.env.OPENROUTER_ESTIMATOR_MODEL?.trim() ||
+    "openrouter/free",
+  openRouterSweepMaxTokens: Number.parseInt(
+    process.env.OPENROUTER_SWEEP_MAX_TOKENS ?? "1200",
+    10
+  ),
   clientOrigins: (process.env.CLIENT_ORIGIN ?? defaultClientOrigin)
     .split(",")
     .map((origin) => origin.trim())
@@ -28,5 +39,14 @@ export function validateEnvironment() {
 
   if (!Number.isInteger(env.openRouterTimeoutMs) || env.openRouterTimeoutMs <= 0) {
     throw new Error("OPENROUTER_TIMEOUT_MS must be a valid positive integer.");
+  }
+
+  if (
+    !Number.isInteger(env.openRouterSweepMaxTokens) ||
+    env.openRouterSweepMaxTokens <= 0
+  ) {
+    throw new Error(
+      "OPENROUTER_SWEEP_MAX_TOKENS must be a valid positive integer."
+    );
   }
 }
